@@ -38,10 +38,12 @@ class FirDeclarationsResolveTransformer(transformer: FirBodyResolveTransformer) 
 
     private var containingClass: FirRegularClass? = null
 
-    override fun transformDeclaration(declaration: FirDeclaration, data: ResolutionMode): CompositeTransformResult<FirDeclaration> {
+    private fun transformDeclarationContent(
+        declaration: FirDeclaration, data: ResolutionMode
+    ): CompositeTransformResult<FirDeclaration> {
         return context.withContainer(declaration) {
             declaration.replaceResolvePhase(transformerPhase)
-            transformer.transformElement(declaration, data)
+            transformer.transformDeclarationContent(declaration, data)
         }
     }
 
@@ -326,7 +328,7 @@ class FirDeclarationsResolveTransformer(transformer: FirBodyResolveTransformer) 
                         scope
                     }
                 }
-                transformDeclaration(regularClass, data)
+                transformDeclarationContent(regularClass, data)
             }
             containingClass = oldContainingClass
             primaryConstructorParametersScope = oldConstructorScope
@@ -343,7 +345,7 @@ class FirDeclarationsResolveTransformer(transformer: FirBodyResolveTransformer) 
             this.type = type
         }
         val result = withLabelAndReceiverType(null, anonymousObject, type) {
-            transformDeclaration(anonymousObject, data)
+            transformDeclarationContent(anonymousObject, data)
         }
         dataFlowAnalyzer.exitAnonymousObject(result.single as FirAnonymousObject)
         @Suppress("UNCHECKED_CAST")
@@ -446,7 +448,7 @@ class FirDeclarationsResolveTransformer(transformer: FirBodyResolveTransformer) 
             addLocalScope(FirLocalScope())
             dataFlowAnalyzer.enterFunction(function)
             @Suppress("UNCHECKED_CAST")
-            transformDeclaration(function, data).also {
+            transformDeclarationContent(function, data).also {
                 val result = it.single as FirFunction<*>
                 dataFlowAnalyzer.exitFunction(result)?.let { controlFlowGraph ->
                     result.transformControlFlowGraphReference(ControlFlowGraphReferenceTransformer, controlFlowGraph)
@@ -470,7 +472,7 @@ class FirDeclarationsResolveTransformer(transformer: FirBodyResolveTransformer) 
             dataFlowAnalyzer.enterInitBlock(anonymousInitializer)
             addLocalScope(primaryConstructorParametersScope)
             addLocalScope(FirLocalScope())
-            transformDeclaration(anonymousInitializer, ResolutionMode.ContextIndependent).also {
+            transformDeclarationContent(anonymousInitializer, ResolutionMode.ContextIndependent).also {
                 dataFlowAnalyzer.exitInitBlock(it.single as FirAnonymousInitializer)
             }
         }
@@ -484,7 +486,7 @@ class FirDeclarationsResolveTransformer(transformer: FirBodyResolveTransformer) 
         }
         val transformedValueParameter =
             valueParameter.transformInitializer(integerLiteralTypeApproximator, valueParameter.returnTypeRef.coneTypeSafe())
-        return (transformDeclaration(
+        return (transformDeclarationContent(
             transformedValueParameter, withExpectedType(transformedValueParameter.returnTypeRef)
         ).single as FirStatement).compose()
     }
