@@ -14,19 +14,16 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.externalSystem.service.execution.ExternalSystemEventDispatcher
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
-import org.jetbrains.kotlin.idea.KotlinIdeaGradleBundle
 import org.jetbrains.kotlin.idea.core.script.ScriptConfigurationManager
 import org.jetbrains.kotlin.idea.core.script.configuration.cache.CachedConfigurationInputs
 import org.jetbrains.kotlin.idea.core.script.configuration.cache.ScriptConfigurationSnapshot
 import org.jetbrains.kotlin.idea.scripting.gradle.GradleScriptInputsWatcher
 import org.jetbrains.kotlin.idea.scripting.gradle.getGradleScriptInputsStamp
-import org.jetbrains.kotlin.idea.scripting.gradle.saveGradleProjectRootsAfterImport
 import org.jetbrains.kotlin.scripting.definitions.findScriptDefinition
 import org.jetbrains.kotlin.scripting.resolve.ScriptCompilationConfigurationWrapper
 import org.jetbrains.kotlin.scripting.resolve.VirtualFileScriptSource
 import org.jetbrains.kotlin.scripting.resolve.adjustByDefinition
 import org.jetbrains.plugins.gradle.service.project.ProjectResolverContext
-import org.jetbrains.plugins.gradle.util.GradleConstants
 import java.io.File
 import kotlin.script.experimental.api.*
 import kotlin.script.experimental.jvm.JvmDependency
@@ -128,7 +125,7 @@ fun saveScriptModels(
         }
     }
 
-    saveGradleProjectRootsAfterImport(
+    project.service<GradleScriptInputsWatcher>().saveGradleProjectRootsAfterImport(
         scriptConfigurations.map { it.first.parent.path }.toSet()
     )
 
