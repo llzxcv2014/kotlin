@@ -71,7 +71,7 @@ FILE: localObject.kt
                 }
 
                 public final override fun foo(): R|kotlin/Int| {
-                    ^foo this@R|special/anonymous|.R|/TestProperty.x|.R|kotlin/Int.plus|(Int(1))
+                    ^foo this@R|/TestProperty|.R|/TestProperty.x|.R|kotlin/Int.plus|(Int(1))
                 }
 
             }
