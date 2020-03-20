@@ -11,6 +11,7 @@ import com.intellij.openapi.roots.libraries.Library
 import com.intellij.openapi.roots.libraries.PersistentLibraryKind
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.util.PathUtil
+import com.intellij.util.containers.ContainerUtil
 import org.jetbrains.kotlin.analyzer.ModuleInfo
 import org.jetbrains.kotlin.analyzer.PlatformAnalysisParameters
 import org.jetbrains.kotlin.analyzer.ResolverForModuleFactory
@@ -20,6 +21,7 @@ import org.jetbrains.kotlin.backend.common.serialization.metadata.metadataVersio
 import org.jetbrains.kotlin.builtins.DefaultBuiltIns
 import org.jetbrains.kotlin.builtins.KotlinBuiltIns
 import org.jetbrains.kotlin.builtins.functions.functionInterfacePackageFragmentProvider
+import org.jetbrains.kotlin.caches.project.cacheInvalidatingOnRootModifications
 import org.jetbrains.kotlin.caches.resolve.IdePlatformKindResolution
 import org.jetbrains.kotlin.config.LanguageVersionSettings
 import org.jetbrains.kotlin.context.ProjectContext
@@ -76,12 +78,20 @@ fun KotlinLibrary.createPackageFragmentProvider(
     )
 }
 
+val Project.nativeLibraryInfoCache: MutableMap<Library, List<LibraryInfo>>
+    get() = cacheInvalidatingOnRootModifications { ContainerUtil.createConcurrentWeakMap() }
+
 class NativePlatformKindResolution : IdePlatformKindResolution {
 
     override fun createLibraryInfo(project: Project, library: Library): List<LibraryInfo> {
+        val cache = project.nativeLibraryInfoCache
+        return cache.computeIfAbsent(library) { doCreateLibraryInfo(project, library) }
+    }
+
+    private fun doCreateLibraryInfo(project: Project, library: Library): List<LibraryInfo> {
         return library.getFiles(OrderRootType.CLASSES).mapNotNull { file ->
-            if (!isLibraryFileForPlatform(file)) return@createLibraryInfo emptyList()
-            val path = PathUtil.getLocalPath(file) ?: return@createLibraryInfo emptyList()
+            if (!isLibraryFileForPlatform(file)) return@doCreateLibraryInfo emptyList()
+            val path = PathUtil.getLocalPath(file) ?: return@doCreateLibraryInfo emptyList()
             NativeLibraryInfo(project, library, path)
         }
     }
