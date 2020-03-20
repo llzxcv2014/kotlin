@@ -285,7 +285,11 @@ class FirDeclarationsResolveTransformer(transformer: FirBodyResolveTransformer) 
         for (declaration in klass.declarations) {
             when (declaration) {
                 is FirRegularClass -> {
-                    prepareLocalClassForBodyResolve(declaration)
+                    withTypeParametersOf(declaration) {
+                        withLabelAndReceiverType(declaration.name, declaration, declaration.defaultType()) {
+                            prepareLocalClassForBodyResolve(declaration)
+                        }
+                    }
                 }
                 is FirCallableMemberDeclaration<*> -> {
                     withTypeParametersOf(declaration) {
@@ -318,16 +322,15 @@ class FirDeclarationsResolveTransformer(transformer: FirBodyResolveTransformer) 
 
         context.storeClass(regularClass)
         return withTypeParametersOf(regularClass) {
-            if (regularClass.symbol.classId.isLocal) {
-                prepareLocalClassForBodyResolve(regularClass)
-            }
-
             val oldConstructorScope = primaryConstructorParametersScope
             val oldContainingClass = containingClass
             primaryConstructorParametersScope = null
             containingClass = regularClass
             val type = regularClass.defaultType()
             val result = withLabelAndReceiverType(regularClass.name, regularClass, type) {
+                if (regularClass.symbol.classId.isLocal) {
+                    prepareLocalClassForBodyResolve(regularClass)
+                }
                 val constructor = regularClass.declarations.firstOrNull() as? FirConstructor
                 if (constructor?.isPrimary == true) {
                     primaryConstructorParametersScope = FirLocalScope().let {
