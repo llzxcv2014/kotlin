@@ -38,7 +38,7 @@ class KotlinScopeProvider(
         klass: FirClass<*>,
         useSiteSession: FirSession,
         scopeSession: ScopeSession
-    ): FirScope {
+    ): FirTypeScope {
         return scopeSession.getOrBuild(klass.symbol, USE_SITE) {
             val declaredScope = declaredMemberScope(klass)
             val decoratedDeclaredMemberScope =
@@ -52,14 +52,18 @@ class KotlinScopeProvider(
                         symbol.fir.scope(
                             substitutor(symbol, useSiteSuperType, useSiteSession),
                             useSiteSession, scopeSession, skipPrivateMembers = true, klass.classId
-                        )
+                        ).let {
+                            it as? FirTypeScope ?: error("$it is expected to be FirOverrideAwareScope")
+                        }
                     } else {
                         null
                     }
                 }
             FirClassUseSiteMemberScope(
                 useSiteSession,
-                FirSuperTypeScope.prepareSupertypeScope(useSiteSession, FirStandardOverrideChecker(useSiteSession), scopes),
+                FirTypeIntersectionScope.prepareIntersectionScope(
+                    useSiteSession, FirStandardOverrideChecker(useSiteSession), scopes
+                ),
                 decoratedDeclaredMemberScope
             )
         }
@@ -95,8 +99,8 @@ internal fun FirClass<*>.scope(
     useSiteSession: FirSession,
     scopeSession: ScopeSession,
     skipPrivateMembers: Boolean,
-    classId: ClassId? = null
-): FirScope {
+    classId: ClassId? = this.classId
+): FirTypeScope {
     val basicScope = scopeProvider.getUseSiteMemberScope(
         this, useSiteSession, scopeSession
     )

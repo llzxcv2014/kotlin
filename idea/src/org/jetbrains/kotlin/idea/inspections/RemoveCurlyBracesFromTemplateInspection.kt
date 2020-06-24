@@ -24,12 +24,14 @@ class RemoveCurlyBracesFromTemplateInspection(@JvmField var reportWithoutWhitesp
         if (reportWithoutWhitespace || element.hasWhitespaceAround()) ProblemHighlightType.GENERIC_ERROR_OR_WARNING
         else ProblemHighlightType.INFORMATION
 
-    override val defaultFixText: String = KotlinBundle.message("remove.curly.braces")
+    override val defaultFixText: String get() = KotlinBundle.message("remove.curly.braces")
 
     override fun isApplicable(element: KtBlockStringTemplateEntry): Boolean = element.canDropBraces()
 
     override fun applyTo(element: KtBlockStringTemplateEntry, project: Project, editor: Editor?) {
-        element.dropBraces()
+        if (element.canDropBraces()) {
+            element.dropBraces()
+        }
     }
 
     override fun createOptionsPanel() = MultipleCheckboxOptionsPanel(this).apply {

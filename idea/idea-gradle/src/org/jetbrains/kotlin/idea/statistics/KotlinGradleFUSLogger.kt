@@ -65,7 +65,7 @@ class KotlinGradleFUSLogger : StartupActivity, DumbAware, Runnable {
                     is BooleanMetrics -> putIfNotNull(metric.name, this.getMetric(metric)?.toStringRepresentation())
                     is StringMetrics -> putIfNotNull(metric.name, this.getMetric(metric)?.toStringRepresentation())
                     is NumericalMetrics -> putIfNotNull(metric.name, this.getMetric(metric)?.toStringRepresentation())
-                    is Pair<*, *> -> putIfNotNull(metric.first.toString(), metric.second.toString())
+                    is Pair<*, *> -> putIfNotNull(metric.first.toString(), metric.second?.toString())
                 }
             }
             if (data.size > 0) {
@@ -100,7 +100,8 @@ class KotlinGradleFUSLogger : StartupActivity, DumbAware, Runnable {
             container.log(
                 GradleStatisticsEvents.MPP,
                 StringMetrics.MPP_PLATFORMS,
-                BooleanMetrics.ENABLED_HMPP
+                BooleanMetrics.ENABLED_HMPP,
+                StringMetrics.JS_COMPILER_MODE
             )
 
             container.log(

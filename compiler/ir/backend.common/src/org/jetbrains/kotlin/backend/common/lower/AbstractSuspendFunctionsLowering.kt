@@ -10,6 +10,7 @@ import org.jetbrains.kotlin.backend.common.ir.*
 import org.jetbrains.kotlin.descriptors.ClassKind
 import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.descriptors.Visibilities
+import org.jetbrains.kotlin.ir.ObsoleteDescriptorBasedAPI
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.builders.*
 import org.jetbrains.kotlin.ir.declarations.*
@@ -38,6 +39,7 @@ import org.jetbrains.kotlin.ir.util.*
 import org.jetbrains.kotlin.ir.visitors.*
 import org.jetbrains.kotlin.name.Name
 
+@ObsoleteDescriptorBasedAPI
 abstract class AbstractSuspendFunctionsLowering<C : CommonBackendContext>(val context: C) : FileLoweringPass {
 
     protected object STATEMENT_ORIGIN_COROUTINE_IMPL : IrStatementOriginImpl("COROUTINE_IMPL")
@@ -288,14 +290,7 @@ abstract class AbstractSuspendFunctionsLowering<C : CommonBackendContext>(val co
                 nameForCoroutineClass(irFunction),
                 ClassKind.CLASS,
                 irFunction.visibility,
-                Modality.FINAL,
-                isCompanion = false,
-                isInner = false,
-                isData = false,
-                isExternal = false,
-                isInline = false,
-                isExpect = false,
-                isFun = false
+                Modality.FINAL
             ).apply {
                 d.bind(this)
                 parent = irFunction.parent
@@ -374,7 +369,7 @@ abstract class AbstractSuspendFunctionsLowering<C : CommonBackendContext>(val co
             }
 
             coroutineClass.superTypes += superTypes
-            coroutineClass.addFakeOverrides()
+            coroutineClass.addFakeOverridesViaIncorrectHeuristic()
 
             initializeStateMachine(coroutineConstructors, coroutineClassThis)
 
@@ -686,8 +681,7 @@ abstract class AbstractSuspendFunctionsLowering<C : CommonBackendContext>(val co
             Visibilities.PRIVATE,
             isFinal = !isMutable,
             isExternal = false,
-            isStatic = false,
-            isFakeOverride = false
+            isStatic = false
         ).also {
             descriptor.bind(it)
             it.parent = this

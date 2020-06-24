@@ -7,10 +7,11 @@ package org.jetbrains.kotlin.descriptors.commonizer.builder
 
 import org.jetbrains.kotlin.descriptors.ClassifierDescriptorWithTypeParameters
 import org.jetbrains.kotlin.descriptors.DeclarationDescriptor
-import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.ir.CirClass
-import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.ir.CirTypeAlias
-import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.ir.CirTypeAliasNode
-import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.ir.indexOfCommon
+import org.jetbrains.kotlin.descriptors.commonizer.cir.CirClass
+import org.jetbrains.kotlin.descriptors.commonizer.cir.CirClassifier
+import org.jetbrains.kotlin.descriptors.commonizer.cir.CirTypeAlias
+import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.CirTypeAliasNode
+import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.CirNode.Companion.indexOfCommon
 import org.jetbrains.kotlin.descriptors.commonizer.utils.CommonizedGroup
 import org.jetbrains.kotlin.name.FqName
 
@@ -19,17 +20,27 @@ internal fun CirTypeAliasNode.buildDescriptors(
     output: CommonizedGroup<ClassifierDescriptorWithTypeParameters>,
     containingDeclarations: List<DeclarationDescriptor?>
 ) {
-    val commonClass: CirClass? = common()
-    val markAsActual = commonClass != null
+    val commonClassifier: CirClassifier? = commonDeclaration()
+    // Note: 'expect class' and lifted up 'typealias' both can't be non-null
+    val commonTypeAlias: CirTypeAlias? = commonClassifier as? CirTypeAlias?
 
-    target.forEachIndexed { index, typeAlias ->
-        typeAlias?.buildDescriptor(components, output, index, containingDeclarations, fqName, isActual = markAsActual)
+    val isLiftedUp = commonTypeAlias?.isLiftedUp == true
+    val markAsActual = commonClassifier != null
+
+    if (!isLiftedUp) {
+        targetDeclarations.forEachIndexed { index, typeAlias ->
+            typeAlias?.buildDescriptor(components, output, index, containingDeclarations, fqName, isActual = markAsActual)
+        }
     }
 
-    commonClass?.buildDescriptor(components, output, indexOfCommon, containingDeclarations, fqName, isExpect = true)
+    if (commonTypeAlias != null) {
+        commonTypeAlias.buildDescriptor(components, output, indexOfCommon, containingDeclarations, fqName)
+    } else if (commonClassifier != null && commonClassifier is CirClass) {
+        commonClassifier.buildDescriptor(components, output, indexOfCommon, containingDeclarations, fqName, isExpect = true)
+    }
 
     // log stats
-    components.statsCollector?.logStats(output.toList())
+    components.statsCollector?.logStats(output)
 }
 
 private fun CirTypeAlias.buildDescriptor(

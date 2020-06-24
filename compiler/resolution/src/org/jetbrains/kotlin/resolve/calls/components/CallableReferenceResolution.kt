@@ -13,19 +13,18 @@ import org.jetbrains.kotlin.resolve.calls.components.CreateFreshVariablesSubstit
 import org.jetbrains.kotlin.resolve.calls.inference.ConstraintSystemOperation
 import org.jetbrains.kotlin.resolve.calls.inference.components.FreshVariableNewTypeSubstitutor
 import org.jetbrains.kotlin.resolve.calls.inference.model.ArgumentConstraintPosition
+import org.jetbrains.kotlin.resolve.calls.inference.model.LowerPriorityToPreserveCompatibility
 import org.jetbrains.kotlin.resolve.calls.model.*
 import org.jetbrains.kotlin.resolve.calls.tasks.ExplicitReceiverKind
 import org.jetbrains.kotlin.resolve.calls.tasks.ExplicitReceiverKind.DISPATCH_RECEIVER
 import org.jetbrains.kotlin.resolve.calls.tasks.ExplicitReceiverKind.EXTENSION_RECEIVER
 import org.jetbrains.kotlin.resolve.calls.tower.*
 import org.jetbrains.kotlin.resolve.descriptorUtil.builtIns
+import org.jetbrains.kotlin.resolve.descriptorUtil.isCompanionObject
 import org.jetbrains.kotlin.resolve.scopes.receivers.DetailedReceiver
 import org.jetbrains.kotlin.resolve.scopes.receivers.ReceiverValue
 import org.jetbrains.kotlin.resolve.scopes.receivers.ReceiverValueWithSmartCastInfo
-import org.jetbrains.kotlin.types.ErrorUtils
-import org.jetbrains.kotlin.types.KotlinType
-import org.jetbrains.kotlin.types.UnwrappedType
-import org.jetbrains.kotlin.types.Variance
+import org.jetbrains.kotlin.types.*
 import org.jetbrains.kotlin.types.checker.captureFromExpression
 import org.jetbrains.kotlin.types.expressions.CoercionStrategy
 import org.jetbrains.kotlin.types.typeUtil.immediateSupertypes
@@ -60,9 +59,19 @@ class CallableReferenceCandidate(
     val explicitReceiverKind: ExplicitReceiverKind,
     val reflectionCandidateType: UnwrappedType,
     val callableReferenceAdaptation: CallableReferenceAdaptation?,
-    val diagnostics: List<KotlinCallDiagnostic>
+    initialDiagnostics: List<KotlinCallDiagnostic>
 ) : Candidate {
+    private val mutableDiagnostics = initialDiagnostics.toMutableList()
+    val diagnostics: List<KotlinCallDiagnostic> = mutableDiagnostics
+
     override val resultingApplicability = getResultApplicability(diagnostics)
+
+    override fun addCompatibilityWarning(other: Candidate) {
+        if (this !== other && other is CallableReferenceCandidate) {
+            mutableDiagnostics.add(CompatibilityWarning(other.candidate))
+        }
+    }
+
     override val isSuccessful get() = resultingApplicability.isSuccess
 
     var freshSubstitutor: FreshVariableNewTypeSubstitutor? = null
@@ -75,8 +84,13 @@ class CallableReferenceAdaptation(
     val argumentTypes: Array<KotlinType>,
     val coercionStrategy: CoercionStrategy,
     val defaults: Int,
-    val mappedArguments: Map<ValueParameterDescriptor, ResolvedCallArgument>
+    val mappedArguments: Map<ValueParameterDescriptor, ResolvedCallArgument>,
+    val suspendConversionStrategy: SuspendConversionStrategy
 )
+
+enum class SuspendConversionStrategy {
+    SUSPEND_CONVERSION, NO_CONVERSION
+}
 
 /**
  * cases: class A {}, class B { companion object }, object C, enum class D { E }
@@ -130,13 +144,13 @@ fun ConstraintSystemOperation.checkCallableReference(
 
     val toFreshSubstitutor = createToFreshVariableSubstitutorAndAddInitialConstraints(candidateDescriptor, this)
 
-    if (expectedType != null) {
-        addSubtypeConstraint(toFreshSubstitutor.safeSubstitute(reflectionCandidateType), expectedType, position)
-    }
-
     if (!ErrorUtils.isError(candidateDescriptor)) {
         addReceiverConstraint(toFreshSubstitutor, dispatchReceiver, candidateDescriptor.dispatchReceiverParameter, position)
         addReceiverConstraint(toFreshSubstitutor, extensionReceiver, candidateDescriptor.extensionReceiverParameter, position)
+    }
+
+    if (expectedType != null && !hasContradiction) {
+        addSubtypeConstraint(toFreshSubstitutor.safeSubstitute(reflectionCandidateType), expectedType, position)
     }
 
     val invisibleMember = Visibilities.findInvisibleMember(
@@ -197,6 +211,10 @@ class CallableReferencesCandidateFactory(
             callComponents.builtIns
         )
 
+        if (needCompatibilityResolveForCallableReference(callableReferenceAdaptation, candidateDescriptor)) {
+            diagnostics.add(LowerPriorityToPreserveCompatibility)
+        }
+
         if (callableReferenceAdaptation != null &&
             callableReferenceAdaptation.defaults != 0 &&
             !callComponents.languageVersionSettings.supportsFeature(LanguageFeature.FunctionReferenceWithDefaultValueAsOtherType)
@@ -239,6 +257,21 @@ class CallableReferencesCandidateFactory(
             candidateDescriptor, dispatchCallableReceiver, extensionCallableReceiver,
             explicitReceiverKind, reflectionCandidateType, callableReferenceAdaptation, diagnostics
         )
+    }
+
+    private fun needCompatibilityResolveForCallableReference(
+        callableReferenceAdaptation: CallableReferenceAdaptation?,
+        candidate: CallableDescriptor
+    ): Boolean {
+        // KT-13934: reference to companion object member via class name
+        if (candidate.containingDeclaration.isCompanionObject() && argument.lhsResult is LHSResult.Type) return true
+
+        if (callableReferenceAdaptation == null) return false
+
+        return callableReferenceAdaptation.defaults != 0 ||
+                callableReferenceAdaptation.suspendConversionStrategy != SuspendConversionStrategy.NO_CONVERSION ||
+                callableReferenceAdaptation.coercionStrategy != CoercionStrategy.NO_COERCION ||
+                callableReferenceAdaptation.mappedArguments.values.any { it is ResolvedCallArgument.VarargArgument }
     }
 
     private enum class VarargMappingState {
@@ -315,10 +348,20 @@ class CallableReferencesCandidateFactory(
             mappedArguments[valueParameter] = ResolvedCallArgument.VarargArgument(varargElements)
         }
 
+        for (valueParameter in descriptor.valueParameters) {
+            if (valueParameter.isVararg && valueParameter !in mappedArguments) {
+                mappedArguments[valueParameter] = ResolvedCallArgument.VarargArgument(emptyList())
+            }
+        }
+
         // lower(Unit!) = Unit
         val returnExpectedType = inputOutputTypes.outputType
 
-        val coercion = if (returnExpectedType.isUnit()) CoercionStrategy.COERCION_TO_UNIT else CoercionStrategy.NO_COERCION
+        val coercion =
+            if (returnExpectedType.isUnit() && descriptor.returnType?.isUnit() == false)
+                CoercionStrategy.COERCION_TO_UNIT
+            else
+                CoercionStrategy.NO_COERCION
 
         val adaptedArguments =
             if (expectedType != null && ReflectionTypes.isBaseTypeForNumberedReferenceTypes(expectedType))
@@ -326,10 +369,18 @@ class CallableReferencesCandidateFactory(
             else
                 mappedArguments
 
+        val suspendConversionStrategy =
+            if (!descriptor.isSuspend && expectedType?.isSuspendFunctionType == true) {
+                SuspendConversionStrategy.SUSPEND_CONVERSION
+            } else {
+                SuspendConversionStrategy.NO_CONVERSION
+            }
+
         return CallableReferenceAdaptation(
             @Suppress("UNCHECKED_CAST") (mappedArgumentTypes as Array<KotlinType>),
             coercion, defaults,
-            adaptedArguments
+            adaptedArguments,
+            suspendConversionStrategy
         )
     }
 
@@ -422,9 +473,12 @@ class CallableReferencesCandidateFactory(
                         descriptorReturnType
                 }
 
+                val suspendConversionStrategy = callableReferenceAdaptation?.suspendConversionStrategy
+                val isSuspend = descriptor.isSuspend || suspendConversionStrategy == SuspendConversionStrategy.SUSPEND_CONVERSION
+
                 return callComponents.reflectionTypes.getKFunctionType(
                     Annotations.EMPTY, null, argumentsAndReceivers, null,
-                    returnType, descriptor.builtIns, descriptor.isSuspend
+                    returnType, descriptor.builtIns, isSuspend
                 ) to callableReferenceAdaptation
             }
             else -> return ErrorUtils.createErrorType("Unsupported descriptor type: $descriptor") to null

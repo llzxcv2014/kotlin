@@ -8,7 +8,8 @@ package org.jetbrains.kotlin.backend.common.lower
 import org.jetbrains.kotlin.backend.common.CommonBackendContext
 import org.jetbrains.kotlin.backend.common.FileLoweringPass
 import org.jetbrains.kotlin.backend.common.IrElementTransformerVoidWithContext
-import org.jetbrains.kotlin.backend.common.ir.addFakeOverrides
+import org.jetbrains.kotlin.backend.common.ScopeWithIr
+import org.jetbrains.kotlin.backend.common.ir.addFakeOverridesViaIncorrectHeuristic
 import org.jetbrains.kotlin.backend.common.ir.copyTo
 import org.jetbrains.kotlin.backend.common.ir.createImplicitParameterDeclarationWithWrappedDescriptor
 import org.jetbrains.kotlin.descriptors.ClassKind
@@ -61,10 +62,11 @@ abstract class SingleAbstractMethodLowering(val context: CommonBackendContext) :
     private val inlineCachedImplementations = mutableMapOf<IrType, IrClass>()
     private var enclosingContainer: IrDeclarationContainer? = null
 
-    open val privateGeneratedWrapperVisibility: Visibility
-        get() = Visibilities.PRIVATE
+    abstract fun getWrapperVisibility(expression: IrTypeOperatorCall, scopes: List<ScopeWithIr>): Visibility
 
     abstract fun getSuperTypeForWrapper(typeOperand: IrType): IrType
+
+    open val inInlineFunctionScope get() = allScopes.any { scope -> (scope.irElement as? IrFunction)?.isInline ?: false }
 
     override fun lower(irFile: IrFile) {
         cachedImplementations.clear()
@@ -102,10 +104,9 @@ abstract class SingleAbstractMethodLowering(val context: CommonBackendContext) :
             if (invokable.isNullConst())
                 return invokable
 
-            val inInlineFunctionScope = allScopes.any { scope -> (scope.irElement as? IrFunction)?.isInline ?: false }
             val cache = if (inInlineFunctionScope) inlineCachedImplementations else cachedImplementations
-            val implementation = cache.getOrPut(superType) {
-                createObjectProxy(superType, inInlineFunctionScope, expression)
+            val implementation = cache.getOrPut(erasedSuperType) {
+                createObjectProxy(erasedSuperType, getWrapperVisibility(expression, allScopes), expression)
             }
 
             return if (superType.isNullable() && invokable.type.isNullable()) {
@@ -136,26 +137,26 @@ abstract class SingleAbstractMethodLowering(val context: CommonBackendContext) :
 
     // Construct a class that wraps an invokable object into an implementation of an interface:
     //     class sam$n(private val invokable: F) : Interface { override fun method(...) = invokable(...) }
-    private fun createObjectProxy(superType: IrType, generatePublicWrapper: Boolean, createFor: IrElement): IrClass {
+    private fun createObjectProxy(superType: IrType, wrapperVisibility: Visibility, createFor: IrElement): IrClass {
         val superClass = superType.classifierOrFail.owner as IrClass
         // The language documentation prohibits casting lambdas to classes, but if it was allowed,
         // the `irDelegatingConstructorCall` in the constructor below would need to be modified.
         assert(superClass.kind == ClassKind.INTERFACE) { "SAM conversion to an abstract class not allowed" }
 
         val superFqName = superClass.fqNameWhenAvailable!!.asString().replace('.', '_')
-        val inlinePrefix = if (generatePublicWrapper) "\$i" else ""
+        val inlinePrefix = if (wrapperVisibility == Visibilities.PUBLIC) "\$i" else ""
         val wrapperName = Name.identifier("sam$inlinePrefix\$$superFqName$SAM_WRAPPER_SUFFIX")
         val superMethod = superClass.functions.single { it.modality == Modality.ABSTRACT }
+        val extensionReceiversCount = if (superMethod.extensionReceiverParameter == null) 0 else 1
         // TODO: have psi2ir cast the argument to the correct function type. Also see the TODO
         //       about type parameters in `visitTypeOperator`.
         val wrappedFunctionClass =
             if (superMethod.isSuspend)
-                context.ir.symbols.suspendFunctionN(superMethod.valueParameters.size).owner
+                context.ir.symbols.suspendFunctionN(superMethod.valueParameters.size + extensionReceiversCount).owner
             else
-                context.ir.symbols.functionN(superMethod.valueParameters.size).owner
+                context.ir.symbols.functionN(superMethod.valueParameters.size + extensionReceiversCount).owner
         val wrappedFunctionType = wrappedFunctionClass.defaultType
 
-        val wrapperVisibility = if (generatePublicWrapper) Visibilities.PUBLIC else privateGeneratedWrapperVisibility
         val subclass = buildClass {
             name = wrapperName
             origin = IrDeclarationOrigin.GENERATED_SAM_IMPLEMENTATION
@@ -163,7 +164,7 @@ abstract class SingleAbstractMethodLowering(val context: CommonBackendContext) :
             setSourceRange(createFor)
         }.apply {
             createImplicitParameterDeclarationWithWrappedDescriptor()
-            superTypes += superType
+            superTypes = listOf(superType) + getAdditionalSupertypes(superType)
             parent = enclosingContainer!!
         }
 
@@ -202,19 +203,27 @@ abstract class SingleAbstractMethodLowering(val context: CommonBackendContext) :
             isSuspend = superMethod.isSuspend
             setSourceRange(createFor)
         }.apply {
-            overriddenSymbols += superMethod.symbol
+            overriddenSymbols = listOf(superMethod.symbol)
             dispatchReceiverParameter = subclass.thisReceiver!!.copyTo(this)
+            extensionReceiverParameter = superMethod.extensionReceiverParameter?.copyTo(this)
             valueParameters = superMethod.valueParameters.map { it.copyTo(this) }
             body = context.createIrBuilder(symbol).irBlockBody {
                 +irReturn(irCall(wrappedFunctionClass.functions.single { it.name == OperatorNameConventions.INVOKE }).apply {
                     dispatchReceiver = irGetField(irGet(dispatchReceiverParameter!!), field)
-                    valueParameters.forEachIndexed { i, parameter -> putValueArgument(i, irGet(parameter)) }
+                    extensionReceiverParameter?.let { putValueArgument(0, irGet(it)) }
+                    valueParameters.forEachIndexed { i, parameter -> putValueArgument(extensionReceiversCount + i, irGet(parameter)) }
                 })
             }
         }
 
-        subclass.addFakeOverrides()
+        generateEqualsHashCode(subclass, superType, field)
+
+        subclass.addFakeOverridesViaIncorrectHeuristic()
 
         return subclass
     }
+
+    protected open fun getAdditionalSupertypes(supertype: IrType): List<IrType> = emptyList()
+
+    protected open fun generateEqualsHashCode(klass: IrClass, supertype: IrType, functionDelegateField: IrField) {}
 }

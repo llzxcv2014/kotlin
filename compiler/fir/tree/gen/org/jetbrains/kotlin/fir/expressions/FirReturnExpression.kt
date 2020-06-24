@@ -25,6 +25,10 @@ abstract class FirReturnExpression : FirJump<FirFunction<*>>() {
 
     override fun <R, D> accept(visitor: FirVisitor<R, D>, data: D): R = visitor.visitReturnExpression(this, data)
 
+    abstract override fun replaceTypeRef(newTypeRef: FirTypeRef)
+
+    abstract override fun <D> transformAnnotations(transformer: FirTransformer<D>, data: D): FirReturnExpression
+
     abstract fun <D> transformResult(transformer: FirTransformer<D>, data: D): FirReturnExpression
 
     abstract fun <D> transformOtherChildren(transformer: FirTransformer<D>, data: D): FirReturnExpression

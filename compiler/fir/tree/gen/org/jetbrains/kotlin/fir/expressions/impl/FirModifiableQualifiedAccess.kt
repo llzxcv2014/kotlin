@@ -21,12 +21,13 @@ import org.jetbrains.kotlin.fir.visitors.*
 interface FirModifiableQualifiedAccess : FirQualifiedAccessWithoutCallee {
     override val source: FirSourceElement?
     override val annotations: MutableList<FirAnnotationCall>
-    override var safe: Boolean
     override val typeArguments: MutableList<FirTypeProjection>
     override var explicitReceiver: FirExpression?
     override var dispatchReceiver: FirExpression
     override var extensionReceiver: FirExpression
     override fun <D> transformChildren(transformer: FirTransformer<D>, data: D): FirModifiableQualifiedAccess
+
+    override fun <D> transformAnnotations(transformer: FirTransformer<D>, data: D): FirModifiableQualifiedAccess
 
     override fun <D> transformTypeArguments(transformer: FirTransformer<D>, data: D): FirModifiableQualifiedAccess
 

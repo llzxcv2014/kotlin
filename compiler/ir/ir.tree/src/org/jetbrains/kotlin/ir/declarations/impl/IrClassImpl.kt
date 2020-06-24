@@ -16,10 +16,8 @@
 
 package org.jetbrains.kotlin.ir.declarations.impl
 
-import org.jetbrains.kotlin.descriptors.ClassDescriptor
-import org.jetbrains.kotlin.descriptors.ClassKind
-import org.jetbrains.kotlin.descriptors.Modality
-import org.jetbrains.kotlin.descriptors.Visibility
+import org.jetbrains.kotlin.descriptors.*
+import org.jetbrains.kotlin.ir.ObsoleteDescriptorBasedAPI
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.declarations.impl.carriers.ClassCarrier
 import org.jetbrains.kotlin.ir.symbols.IrClassSymbol
@@ -42,13 +40,14 @@ class IrClassImpl(
     override val kind: ClassKind,
     visibility: Visibility,
     modality: Modality,
-    override val isCompanion: Boolean,
-    override val isInner: Boolean,
-    override val isData: Boolean,
-    override val isExternal: Boolean,
-    override val isInline: Boolean,
-    override val isExpect: Boolean,
-    override val isFun: Boolean
+    override val isCompanion: Boolean = false,
+    override val isInner: Boolean = false,
+    override val isData: Boolean = false,
+    override val isExternal: Boolean = false,
+    override val isInline: Boolean = false,
+    override val isExpect: Boolean = false,
+    override val isFun: Boolean = false,
+    override val source: SourceElement = SourceElement.NO_SOURCE
 ) :
     IrDeclarationBase<ClassCarrier>(startOffset, endOffset, origin),
     IrClass,
@@ -59,27 +58,26 @@ class IrClassImpl(
         endOffset: Int,
         origin: IrDeclarationOrigin,
         symbol: IrClassSymbol,
-        modality: Modality = symbol.descriptor.modality,
-        visibility: Visibility = symbol.descriptor.visibility
-    ) :
-            this(
-                startOffset, endOffset, origin, symbol,
-                symbol.descriptor.name, symbol.descriptor.kind,
-                visibility,
-                modality = modality,
-                isCompanion = symbol.descriptor.isCompanionObject,
-                isInner = symbol.descriptor.isInner,
-                isData = symbol.descriptor.isData,
-                isExternal = symbol.descriptor.isEffectivelyExternal(),
-                isInline = symbol.descriptor.isInline,
-                isExpect = symbol.descriptor.isExpect,
-                isFun = symbol.descriptor.isFun
-            )
+        descriptor: ClassDescriptor,
+        name: Name = descriptor.name,
+        visibility: Visibility = descriptor.visibility,
+        modality: Modality = descriptor.modality
+    ) : this(
+        startOffset, endOffset, origin, symbol,
+        name, kind = descriptor.kind,
+        visibility = visibility, modality = modality,
+        isCompanion = descriptor.isCompanionObject, isInner = descriptor.isInner,
+        isData = descriptor.isData, isExternal = descriptor.isEffectivelyExternal(),
+        isInline = descriptor.isInline, isExpect = descriptor.isExpect,
+        isFun = descriptor.isFun,
+        source = descriptor.source
+    )
 
     init {
         symbol.bind(this)
     }
 
+    @ObsoleteDescriptorBasedAPI
     override val descriptor: ClassDescriptor get() = symbol.descriptor
 
     override var visibilityField: Visibility = visibility

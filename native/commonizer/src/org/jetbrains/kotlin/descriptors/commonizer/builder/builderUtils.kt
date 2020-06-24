@@ -7,8 +7,9 @@ package org.jetbrains.kotlin.descriptors.commonizer.builder
 
 import org.jetbrains.kotlin.descriptors.*
 import org.jetbrains.kotlin.descriptors.annotations.Annotations
-import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.ir.*
-import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.ir.CirSimpleTypeKind.Companion.areCompatible
+import org.jetbrains.kotlin.descriptors.commonizer.cir.*
+import org.jetbrains.kotlin.descriptors.commonizer.cir.CirSimpleTypeKind.Companion.areCompatible
+import org.jetbrains.kotlin.descriptors.commonizer.cir.factory.cirSimpleTypeKind
 import org.jetbrains.kotlin.descriptors.commonizer.utils.isUnderStandardKotlinPackages
 import org.jetbrains.kotlin.descriptors.commonizer.utils.resolveClassOrTypeAliasByFqName
 import org.jetbrains.kotlin.descriptors.impl.ValueParameterDescriptorImpl
@@ -50,7 +51,6 @@ internal fun List<CirTypeParameter>.buildDescriptorsAndTypeParameterResolver(
 
     return ownTypeParameters to typeParameterResolver
 }
-
 
 internal fun List<CirValueParameter>.buildDescriptors(
     targetComponents: TargetDeclarationsBuilderComponents,
@@ -110,7 +110,7 @@ internal fun CirSimpleType.buildType(
 
         CirSimpleTypeKind.TYPE_PARAMETER -> {
             typeParameterResolver.resolve(fqName.shortName())
-                ?: error("Type parameter $fqName not found in ${typeParameterResolver::class.java}, $typeParameterResolver")
+                ?: error("Type parameter $fqName not found in ${typeParameterResolver::class.java}, $typeParameterResolver for ${targetComponents.target}")
         }
 
         CirSimpleTypeKind.CLASS, CirSimpleTypeKind.TYPE_ALIAS -> {
@@ -120,17 +120,23 @@ internal fun CirSimpleType.buildType(
         }
     }
 
-    // TODO: commonize annotations, KT-34234
-    val typeAnnotations = if (!targetComponents.isCommon) annotations.buildDescriptors(targetComponents) else Annotations.EMPTY
-    val rawType = simpleType(
-        annotations = typeAnnotations,
+    val simpleType = simpleType(
+        annotations = Annotations.EMPTY,
         constructor = classifier.typeConstructor,
         arguments = arguments.map { it.buildArgument(targetComponents, typeParameterResolver) },
         nullable = isMarkedNullable,
         kotlinTypeRefiner = null
     )
 
-    return if (isDefinitelyNotNullType) rawType.makeSimpleTypeDefinitelyNotNullOrNotNull() else rawType
+    val computedType = if (classifier is TypeAliasDescriptor)
+        classifier.underlyingType.withAbbreviation(simpleType)
+    else
+        simpleType
+
+    return if (isDefinitelyNotNullType)
+        computedType.makeSimpleTypeDefinitelyNotNullOrNotNull()
+    else
+        computedType
 }
 
 internal fun findClassOrTypeAlias(
@@ -143,18 +149,18 @@ internal fun findClassOrTypeAlias(
 
         // TODO: this works fine for Native as far as built-ins module contains full Native stdlib, but this is not enough for JVM and JS
         builtInsModule.resolveClassOrTypeAliasByFqName(fqName, NoLookupLocation.FOR_ALREADY_TRACKED)
-            ?: error("Classifier $fqName not found in built-ins module $builtInsModule")
+            ?: error("Classifier $fqName not found in built-ins module $builtInsModule for ${targetComponents.target}")
     }
 
     else -> {
         // otherwise, find the appropriate user classifier:
         targetComponents.findAppropriateClassOrTypeAlias(fqName)
-            ?: error("Classifier $fqName not found in created descriptors cache")
+            ?: error("Classifier $fqName not found in created descriptors cache for ${targetComponents.target}")
     }
 }
 
 private fun checkClassifier(classifier: ClassifierDescriptor, kind: CirSimpleTypeKind, strict: Boolean) {
-    val classifierKind = CirSimpleTypeKind.determineKind(classifier)
+    val classifierKind = classifier.cirSimpleTypeKind
 
     if (strict) {
         check(kind == classifierKind) {

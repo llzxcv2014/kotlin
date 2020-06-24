@@ -22,6 +22,8 @@ interface FirCallableDeclaration<F : FirCallableDeclaration<F>> : FirTypedDeclar
     override val source: FirSourceElement?
     override val session: FirSession
     override val resolvePhase: FirResolvePhase
+    override val origin: FirDeclarationOrigin
+    override val attributes: FirDeclarationAttributes
     override val annotations: List<FirAnnotationCall>
     override val returnTypeRef: FirTypeRef
     val receiverTypeRef: FirTypeRef?
@@ -29,7 +31,13 @@ interface FirCallableDeclaration<F : FirCallableDeclaration<F>> : FirTypedDeclar
 
     override fun <R, D> accept(visitor: FirVisitor<R, D>, data: D): R = visitor.visitCallableDeclaration(this, data)
 
+    override fun replaceResolvePhase(newResolvePhase: FirResolvePhase)
+
+    override fun replaceReturnTypeRef(newReturnTypeRef: FirTypeRef)
+
     fun replaceReceiverTypeRef(newReceiverTypeRef: FirTypeRef?)
+
+    override fun <D> transformAnnotations(transformer: FirTransformer<D>, data: D): FirCallableDeclaration<F>
 
     override fun <D> transformReturnTypeRef(transformer: FirTransformer<D>, data: D): FirCallableDeclaration<F>
 

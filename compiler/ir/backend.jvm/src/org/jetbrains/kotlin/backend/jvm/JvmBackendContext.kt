@@ -11,6 +11,7 @@ import org.jetbrains.kotlin.backend.common.Mapping
 import org.jetbrains.kotlin.backend.common.ir.Ir
 import org.jetbrains.kotlin.backend.common.lower.irThrow
 import org.jetbrains.kotlin.backend.common.phaser.PhaseConfig
+import org.jetbrains.kotlin.backend.jvm.codegen.ClassCodegen
 import org.jetbrains.kotlin.backend.jvm.codegen.IrTypeMapper
 import org.jetbrains.kotlin.backend.jvm.codegen.MethodSignatureMapper
 import org.jetbrains.kotlin.backend.jvm.codegen.createFakeContinuation
@@ -20,8 +21,6 @@ import org.jetbrains.kotlin.backend.jvm.intrinsics.IrIntrinsicMethods
 import org.jetbrains.kotlin.backend.jvm.lower.CollectionStubComputer
 import org.jetbrains.kotlin.backend.jvm.lower.inlineclasses.InlineClassAbi
 import org.jetbrains.kotlin.backend.jvm.lower.inlineclasses.MemoizedInlineClassReplacements
-import org.jetbrains.kotlin.backend.jvm.lower.suspendFunctionOriginal
-import org.jetbrains.kotlin.codegen.inline.NameGenerator
 import org.jetbrains.kotlin.codegen.state.GenerationState
 import org.jetbrains.kotlin.descriptors.ClassConstructorDescriptor
 import org.jetbrains.kotlin.descriptors.ClassDescriptor
@@ -40,7 +39,6 @@ import org.jetbrains.kotlin.ir.symbols.*
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.util.SymbolTable
 import org.jetbrains.kotlin.name.FqName
-import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.psi2ir.PsiErrorBuilder
 import org.jetbrains.kotlin.psi2ir.PsiSourceManager
 import org.jetbrains.kotlin.resolve.jvm.JvmClassName
@@ -55,7 +53,8 @@ class JvmBackendContext(
     val phaseConfig: PhaseConfig,
     // If the JVM fqname of a class differs from what is implied by its parent, e.g. if it's a file class
     // annotated with @JvmPackageName, the correct name is recorded here.
-    internal val classNameOverride: MutableMap<IrClass, JvmClassName>
+    val classNameOverride: MutableMap<IrClass, JvmClassName>,
+    internal val createCodegen: (IrClass, JvmBackendContext, IrFunction?) -> ClassCodegen?,
 ) : CommonBackendContext {
     override val transformedFunction: MutableMap<IrFunctionSymbol, IrSimpleFunctionSymbol>
         get() = TODO("not implemented")
@@ -69,7 +68,8 @@ class JvmBackendContext(
     val typeMapper = IrTypeMapper(this)
     val methodSignatureMapper = MethodSignatureMapper(this)
 
-    override val declarationFactory: JvmDeclarationFactory = JvmDeclarationFactory(methodSignatureMapper, state.languageVersionSettings)
+    override val declarationFactory: JvmDeclarationFactory =
+        JvmDeclarationFactory(this, methodSignatureMapper, state.languageVersionSettings)
 
     override val mapping: Mapping = DefaultMapping()
 
@@ -92,17 +92,12 @@ class JvmBackendContext(
 
     internal val customEnclosingFunction = mutableMapOf<IrAttributeContainer, IrFunction>()
 
-    // TODO cache these at ClassCodegen level. Currently, sharing this map between classes in a module is required
-    //      because IrSourceCompilerForInline constructs a new (Fake)ClassCodegen for every call to
-    //      an inline function in the same module. Thus, if two inline functions happen to have the same name
-    //      and call a third inline function that has an anonymous object, the one which is called last
-    //      will overwrite the other's regenerated copy. (Or don't recompile the inline function for every call.)
-    internal val regeneratedObjectNameGenerators = mutableMapOf<Pair<IrClass, Name>, NameGenerator>()
+    internal val classCodegens = mutableMapOf<IrClass, ClassCodegen>()
 
-    internal val localDelegatedProperties = mutableMapOf<IrClass, List<IrLocalDelegatedPropertySymbol>>()
+    val localDelegatedProperties = mutableMapOf<IrClass, List<IrLocalDelegatedPropertySymbol>>()
 
     internal val multifileFacadesToAdd = mutableMapOf<JvmClassName, MutableList<IrClass>>()
-    internal val multifileFacadeForPart = mutableMapOf<IrClass, JvmClassName>()
+    val multifileFacadeForPart = mutableMapOf<IrClass, JvmClassName>()
     internal val multifileFacadeClassForPart = mutableMapOf<IrClass, IrClass>()
     internal val multifileFacadeMemberToPartMember = mutableMapOf<IrFunction, IrFunction>()
 
@@ -122,7 +117,7 @@ class JvmBackendContext(
 
     val staticDefaultStubs = mutableMapOf<IrFunctionSymbol, IrFunction>()
 
-    val inlineClassReplacements = MemoizedInlineClassReplacements()
+    val inlineClassReplacements = MemoizedInlineClassReplacements(state.functionsWithInlineClassReturnTypesMangled)
 
     internal fun referenceClass(descriptor: ClassDescriptor): IrClassSymbol =
         symbolTable.lazyWrapper.referenceClass(descriptor)

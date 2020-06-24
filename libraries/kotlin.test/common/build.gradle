@@ -13,16 +13,8 @@ jar {
     manifestAttributes(manifest, project, 'Test')
 }
 
-task sourcesJar(type: Jar, dependsOn: classes) {
-    classifier = 'sources'
-    from sourceSets.main.kotlin
-}
-
-artifacts {
-    archives sourcesJar
-}
-
-javadocJar()
+configureSourcesJar()
+configureJavadocJar()
 
 tasks.withType(org.jetbrains.kotlin.gradle.dsl.KotlinCompile) {
     kotlinOptions.freeCompilerArgs += "-Xallow-kotlin-package"

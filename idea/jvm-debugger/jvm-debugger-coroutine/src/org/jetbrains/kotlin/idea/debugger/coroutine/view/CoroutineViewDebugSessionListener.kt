@@ -11,7 +11,6 @@ import com.intellij.xdebugger.XDebugSession
 import com.intellij.xdebugger.XDebugSessionListener
 import com.intellij.xdebugger.frame.XSuspendContext
 import com.intellij.xdebugger.impl.ui.DebuggerUIUtil
-import com.sun.jdi.request.EventRequest
 import org.jetbrains.kotlin.idea.debugger.coroutine.util.logger
 
 class CoroutineViewDebugSessionListener(
@@ -49,7 +48,7 @@ class CoroutineViewDebugSessionListener(
         renew(suspendContext)
     }
 
-    fun renew(suspendContext: XSuspendContext) {
+    private fun renew(suspendContext: XSuspendContext) {
         if (suspendContext is SuspendContextImpl) {
             DebuggerUIUtil.invokeLater {
                 xCoroutineView.renewRoot(suspendContext)

@@ -6,26 +6,27 @@
 package org.jetbrains.kotlin.ir.declarations
 
 import org.jetbrains.kotlin.descriptors.PropertyDescriptor
+import org.jetbrains.kotlin.ir.ObsoleteDescriptorBasedAPI
 import org.jetbrains.kotlin.ir.expressions.IrExpressionBody
 import org.jetbrains.kotlin.ir.symbols.IrFieldSymbol
 import org.jetbrains.kotlin.ir.symbols.IrPropertySymbol
 import org.jetbrains.kotlin.ir.types.IrType
 
 interface IrField :
-    IrSymbolDeclaration<IrFieldSymbol>, IrOverridableDeclaration<IrFieldSymbol>,
+    IrSymbolDeclaration<IrFieldSymbol>,
     IrDeclarationWithName, IrDeclarationWithVisibility, IrDeclarationParent {
 
+    @ObsoleteDescriptorBasedAPI
     override val descriptor: PropertyDescriptor
 
     val type: IrType
     val isFinal: Boolean
     val isExternal: Boolean
     val isStatic: Boolean
-    val isFakeOverride: Boolean
 
     var initializer: IrExpressionBody?
 
     var correspondingPropertySymbol: IrPropertySymbol?
 
-    override val metadata: MetadataSource.Property?
+    override val metadata: MetadataSource?
 }

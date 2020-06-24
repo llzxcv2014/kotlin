@@ -86,7 +86,8 @@ class DeclarationGenerator(override val context: GeneratorContext) : Generator {
                 ktTypeAlias.startOffsetSkippingComments, ktTypeAlias.endOffset,
                 symbol,
                 typeAliasDescriptor.expandedType.toIrType(),
-                IrDeclarationOrigin.DEFINED
+                IrDeclarationOrigin.DEFINED,
+                typeAliasDescriptor
             )
         }
         generateGlobalTypeParametersDeclarations(irTypeAlias, typeAliasDescriptor.declaredTypeParameters)
@@ -173,7 +174,7 @@ abstract class DeclarationGeneratorExtension(val declarationGenerator: Declarati
 
     inline fun <T : IrDeclaration> T.buildWithScope(builder: (T) -> Unit): T =
         also { irDeclaration ->
-            context.symbolTable.withScope(irDeclaration.descriptor) {
+            context.symbolTable.withScope(irDeclaration) {
                 builder(irDeclaration)
             }
         }

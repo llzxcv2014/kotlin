@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2019 JetBrains s.r.o. and Kotlin Programming Language contributors.
+ * Copyright 2010-2020 JetBrains s.r.o. and Kotlin Programming Language contributors.
  * Use of this source code is governed by the Apache 2.0 license that can be found in the license/LICENSE.txt file.
  */
 
@@ -9,8 +9,8 @@ import com.google.gson.Gson
 import org.gradle.api.Project
 import org.jetbrains.kotlin.gradle.targets.js.npm.GradleNodeModule
 import org.jetbrains.kotlin.gradle.targets.js.npm.NpmProject
-import org.jetbrains.kotlin.gradle.targets.js.npm.resolved.KotlinCompilationNpmResolution
 import org.jetbrains.kotlin.gradle.targets.js.npm.PackageJson
+import org.jetbrains.kotlin.gradle.targets.js.npm.resolved.KotlinCompilationNpmResolution
 import java.io.File
 
 class YarnImportedPackagesVersionResolver(
@@ -24,14 +24,23 @@ class YarnImportedPackagesVersionResolver(
         it.externalGradleDependencies
     }
 
+    private val internalCompositeModules = npmProjects.flatMapTo(mutableSetOf()) {
+        it.internalCompositeDependencies
+    }
+
     fun resolveAndUpdatePackages(): MutableList<String> {
-        resolve()
-        updatePackages()
+        resolveAndUpdate(externalModules, false)
+        resolveAndUpdate(internalCompositeModules, true)
         return importedProjectWorkspaces
     }
 
-    private fun resolve() {
-        externalModules.groupBy { it.name }.forEach { (name, versions) ->
+    private fun resolveAndUpdate(modules: MutableSet<GradleNodeModule>, isWorkspace: Boolean) {
+        resolve(modules, isWorkspace)
+        updatePackages(modules)
+    }
+
+    private fun resolve(modules: MutableSet<GradleNodeModule>, isWorkspace: Boolean) {
+        modules.groupBy { it.name }.forEach { (name, versions) ->
             val selected: GradleNodeModule = if (versions.size > 1) {
                 val sorted = versions.sortedBy { it.semver }
                 rootProject.logger.warn(
@@ -43,18 +52,20 @@ class YarnImportedPackagesVersionResolver(
                 selected
             } else versions.single()
 
-            importedProjectWorkspaces.add(selected.path.relativeTo(nodeJsWorldDir).path)
+            if (isWorkspace) {
+                importedProjectWorkspaces.add(selected.path.relativeTo(nodeJsWorldDir).path)
+            }
         }
     }
 
-    private fun updatePackages() {
+    private fun updatePackages(modules: MutableSet<GradleNodeModule>) {
         if (resolvedVersion.isEmpty()) return
 
         npmProjects.forEach {
             updatePackageJson(it.packageJson, it.npmProject.packageJsonFile)
         }
 
-        externalModules.forEach {
+        modules.forEach {
             val packageJsonFile = it.path.resolve(NpmProject.PACKAGE_JSON)
             val packageJson = packageJsonFile.reader().use {
                 Gson().fromJson<PackageJson>(it, PackageJson::class.java)
@@ -78,7 +89,7 @@ class YarnImportedPackagesVersionResolver(
         var doneSomething = false
         map.iterator().forEachRemaining {
             val resolved = resolvedVersion[it.key]
-            if (resolved != null) {
+            if (resolved != null && it.value != resolved) {
                 it.setValue(resolved)
                 doneSomething = true
             }

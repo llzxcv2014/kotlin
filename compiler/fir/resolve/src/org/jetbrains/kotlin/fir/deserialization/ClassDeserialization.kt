@@ -6,10 +6,12 @@
 package org.jetbrains.kotlin.fir.deserialization
 
 import org.jetbrains.kotlin.builtins.KotlinBuiltIns
+import org.jetbrains.kotlin.builtins.jvm.JvmBuiltInsSettings
 import org.jetbrains.kotlin.descriptors.ClassKind
 import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.descriptors.Visibilities
 import org.jetbrains.kotlin.fir.FirSession
+import org.jetbrains.kotlin.fir.declarations.FirDeclarationOrigin
 import org.jetbrains.kotlin.fir.declarations.FirResolvePhase
 import org.jetbrains.kotlin.fir.declarations.addDeclarations
 import org.jetbrains.kotlin.fir.declarations.builder.*
@@ -17,12 +19,16 @@ import org.jetbrains.kotlin.fir.declarations.impl.FirDeclarationStatusImpl
 import org.jetbrains.kotlin.fir.expressions.FirAnnotationCall
 import org.jetbrains.kotlin.fir.generateValueOfFunction
 import org.jetbrains.kotlin.fir.generateValuesFunction
-import org.jetbrains.kotlin.fir.resolve.impl.FirClonableSymbolProvider.Companion.CLONE
-import org.jetbrains.kotlin.fir.resolve.impl.FirClonableSymbolProvider.Companion.CLONABLE_CLASS_ID
+import org.jetbrains.kotlin.fir.resolve.providers.impl.FirClonableSymbolProvider.Companion.CLONABLE_CLASS_ID
+import org.jetbrains.kotlin.fir.resolve.providers.impl.FirClonableSymbolProvider.Companion.CLONE
+import org.jetbrains.kotlin.fir.resolve.transformers.sealedInheritors
 import org.jetbrains.kotlin.fir.scopes.KotlinScopeProvider
 import org.jetbrains.kotlin.fir.symbols.CallableId
 import org.jetbrains.kotlin.fir.symbols.ConeTypeParameterLookupTag
-import org.jetbrains.kotlin.fir.symbols.impl.*
+import org.jetbrains.kotlin.fir.symbols.impl.ConeClassLikeLookupTagImpl
+import org.jetbrains.kotlin.fir.symbols.impl.FirNamedFunctionSymbol
+import org.jetbrains.kotlin.fir.symbols.impl.FirRegularClassSymbol
+import org.jetbrains.kotlin.fir.symbols.impl.FirVariableSymbol
 import org.jetbrains.kotlin.fir.types.builder.buildResolvedTypeRef
 import org.jetbrains.kotlin.fir.types.impl.ConeClassLikeTypeImpl
 import org.jetbrains.kotlin.fir.types.impl.ConeTypeParameterTypeImpl
@@ -32,8 +38,10 @@ import org.jetbrains.kotlin.metadata.deserialization.NameResolver
 import org.jetbrains.kotlin.metadata.deserialization.TypeTable
 import org.jetbrains.kotlin.metadata.deserialization.supertypes
 import org.jetbrains.kotlin.name.ClassId
+import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.serialization.deserialization.ProtoEnumFlags
+import org.jetbrains.kotlin.serialization.deserialization.descriptors.DeserializedContainerSource
 import org.jetbrains.kotlin.serialization.deserialization.getName
 
 fun deserializeClassToSymbol(
@@ -45,6 +53,7 @@ fun deserializeClassToSymbol(
     defaultAnnotationDeserializer: AbstractAnnotationDeserializer?,
     scopeProvider: KotlinScopeProvider,
     parentContext: FirDeserializationContext? = null,
+    containerSource: DeserializedContainerSource? = null,
     deserializeNestedClass: (ClassId, FirDeserializationContext) -> FirRegularClassSymbol?
 ) {
     val flags = classProto.flags
@@ -62,19 +71,21 @@ fun deserializeClassToSymbol(
         isInline = Flags.IS_INLINE_CLASS.get(classProto.flags)
     }
     val isSealed = modality == Modality.SEALED
-    val classBuilder = if (isSealed) FirSealedClassBuilder() else FirClassImplBuilder()
     val context =
         parentContext?.childContext(
             classProto.typeParameterList,
             nameResolver,
             TypeTable(classProto.typeTable),
-            classId.relativeClassName
+            classId.relativeClassName,
+            status.isInner
         ) ?: FirDeserializationContext.createForClass(
             classId, classProto, nameResolver, session,
-            defaultAnnotationDeserializer ?: FirBuiltinAnnotationDeserializer(session)
+            defaultAnnotationDeserializer ?: FirBuiltinAnnotationDeserializer(session),
+            containerSource
         )
-    classBuilder.apply {
+    buildRegularClass {
         this.session = session
+        origin = FirDeclarationOrigin.Library
         name = classId.shortClassName
         this.status = status
         classKind = ProtoEnumFlags.classKind(kind)
@@ -82,7 +93,10 @@ fun deserializeClassToSymbol(
         this.symbol = symbol
 
         resolvePhase = FirResolvePhase.ANALYZED_DEPENDENCIES
+
         typeParameters += context.typeDeserializer.ownTypeParameters.map { it.fir }
+        if (status.isInner)
+            typeParameters += parentContext?.allTypeParameters?.map { buildOuterClassTypeParameterRef { this.symbol = it } }.orEmpty()
 //        annotations += context.annotationDeserializer.loadClassAnnotations(classProto, context.nameResolver)
 
         val typeDeserializer = context.typeDeserializer
@@ -120,6 +134,7 @@ fun deserializeClassToSymbol(
                 val enumType = ConeClassLikeTypeImpl(symbol.toLookupTag(), emptyArray(), false)
                 val property = buildEnumEntry {
                     this.session = session
+                    origin = FirDeclarationOrigin.Library
                     returnTypeRef = buildResolvedTypeRef { type = enumType }
                     name = enumEntryName
                     this.symbol = FirVariableSymbol(CallableId(classId, enumEntryName))
@@ -139,12 +154,16 @@ fun deserializeClassToSymbol(
         }
 
         if (isSealed) {
-            classProto.sealedSubclassFqNameList.mapTo((this as FirSealedClassBuilder).inheritors) {
-                ClassId.fromString(nameResolver.getQualifiedClassName(it))
-            }
+
         }
         addCloneForArrayIfNeeded(classId)
-    }.build().also {
+        addSerializableIfNeeded(classId)
+    }.also {
+        if (isSealed) {
+            it.sealedInheritors = classProto.sealedSubclassFqNameList.map { nameIndex ->
+                ClassId.fromString(nameResolver.getQualifiedClassName(nameIndex))
+            }
+        }
         (it.annotations as MutableList<FirAnnotationCall>) += context.annotationDeserializer.loadClassAnnotations(classProto, context.nameResolver)
     }
 }
@@ -162,7 +181,20 @@ private val ARRAY_CLASSES: Set<Name> = setOf(
     Name.identifier("BooleanArray"),
 )
 
-private fun AbstractFirRegularClassBuilder.addCloneForArrayIfNeeded(classId: ClassId) {
+private val JAVA_IO_SERIALIZABLE = ClassId.topLevel(FqName("java.io.Serializable"))
+
+private fun FirRegularClassBuilder.addSerializableIfNeeded(classId: ClassId) {
+    if (!JvmBuiltInsSettings.isSerializableInJava(classId.asSingleFqName().toUnsafe())) return
+    superTypeRefs += buildResolvedTypeRef {
+        type = ConeClassLikeTypeImpl(
+            ConeClassLikeLookupTagImpl(JAVA_IO_SERIALIZABLE),
+            typeArguments = emptyArray(),
+            isNullable = false
+        )
+    }
+}
+
+private fun FirRegularClassBuilder.addCloneForArrayIfNeeded(classId: ClassId) {
     if (classId.packageFqName != KotlinBuiltIns.BUILT_INS_PACKAGE_FQ_NAME) return
     if (classId.shortClassName !in ARRAY_CLASSES) return
     superTypeRefs += buildResolvedTypeRef {
@@ -174,6 +206,7 @@ private fun AbstractFirRegularClassBuilder.addCloneForArrayIfNeeded(classId: Cla
     }
     declarations += buildSimpleFunction {
         session = this@addCloneForArrayIfNeeded.session
+        origin = FirDeclarationOrigin.Library
         resolvePhase = FirResolvePhase.ANALYZED_DEPENDENCIES
         returnTypeRef = buildResolvedTypeRef {
             val typeArguments = if (classId.shortClassName == ARRAY) {

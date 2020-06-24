@@ -6,6 +6,7 @@
 package org.jetbrains.kotlin.ir.declarations.impl
 
 import org.jetbrains.kotlin.descriptors.ScriptDescriptor
+import org.jetbrains.kotlin.ir.ObsoleteDescriptorBasedAPI
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.declarations.*
@@ -42,6 +43,8 @@ class IrScriptImpl(
     override val statements: MutableList<IrStatement> = mutableListOf()
 
     override lateinit var thisReceiver: IrValueParameter
+
+    @ObsoleteDescriptorBasedAPI
     override val descriptor: ScriptDescriptor = symbol.descriptor
 
     init {

@@ -11,6 +11,10 @@ plugins {
     id("jps-compatible")
 }
 
+configure<GradlePluginDevelopmentExtension> {
+    isAutomatedPublishing = false
+}
+
 publish()
 
 val jarContents by configurations.creating
@@ -35,8 +39,8 @@ dependencies {
     compileOnly(project(":daemon-common"))
 
     compile(kotlinStdlib())
-    compile(project(":native:kotlin-native-utils"))
     compile(project(":kotlin-util-klib"))
+    compileOnly(project(":native:kotlin-native-utils"))
     compileOnly(project(":kotlin-reflect-api"))
     compileOnly(project(":kotlin-android-extensions"))
     compileOnly(project(":kotlin-build-common"))
@@ -49,6 +53,7 @@ dependencies {
 
     compile("com.google.code.gson:gson:${rootProject.extra["versions.jar.gson"]}")
     compile("de.undercouch:gradle-download-task:4.0.2")
+    implementation("com.github.gundy:semver4j:0.16.4")
     
     compileOnly("com.android.tools.build:gradle:2.0.0")
     compileOnly("com.android.tools.build:gradle-core:2.0.0")
@@ -59,13 +64,13 @@ dependencies {
 
     compileOnly(intellijCoreDep()) { includeJars("intellij-core") }
 
-    runtime(projectRuntimeJar(":kotlin-compiler-embeddable"))
-    runtime(projectRuntimeJar(":kotlin-annotation-processing-gradle"))
-    runtime(projectRuntimeJar(":kotlin-android-extensions"))
-    runtime(projectRuntimeJar(":kotlin-compiler-runner"))
-    runtime(projectRuntimeJar(":kotlin-scripting-compiler-embeddable"))
-    runtime(projectRuntimeJar(":kotlin-scripting-compiler-impl-embeddable"))
-    runtime(project(":kotlin-reflect"))
+    runtimeOnly(projectRuntimeJar(":kotlin-compiler-embeddable"))
+    runtimeOnly(projectRuntimeJar(":kotlin-annotation-processing-gradle"))
+    runtimeOnly(projectRuntimeJar(":kotlin-android-extensions"))
+    runtimeOnly(projectRuntimeJar(":kotlin-compiler-runner"))
+    runtimeOnly(projectRuntimeJar(":kotlin-scripting-compiler-embeddable"))
+    runtimeOnly(projectRuntimeJar(":kotlin-scripting-compiler-impl-embeddable"))
+    runtimeOnly(project(":kotlin-reflect"))
 
     jarContents(compileOnly(intellijDep()) {
         includeJars("asm-all", "gson", "serviceMessages", rootProject = rootProject)
@@ -134,7 +139,7 @@ tasks {
         failOnWarning = true
     }
 
-    named<Upload>("install") {
+    named("install") {
         dependsOn(named("validateTaskProperties"))
     }
 
@@ -201,3 +206,5 @@ pluginBundle {
         display = "Kotlin Native plugin for CocoaPods integration"
     )
 }
+
+publishPluginMarkers()

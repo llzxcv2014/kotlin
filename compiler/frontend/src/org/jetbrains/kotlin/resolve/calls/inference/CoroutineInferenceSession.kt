@@ -5,11 +5,20 @@
 
 package org.jetbrains.kotlin.resolve.calls.inference
 
+import com.intellij.psi.PsiElement
 import org.jetbrains.kotlin.builtins.KotlinBuiltIns
 import org.jetbrains.kotlin.descriptors.CallableDescriptor
 import org.jetbrains.kotlin.descriptors.ModuleDescriptor
 import org.jetbrains.kotlin.descriptors.impl.LocalVariableDescriptor
+import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
+import org.jetbrains.kotlin.psi.KtDoubleColonExpression
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtReferenceExpression
+import org.jetbrains.kotlin.psi.psiUtil.anyDescendantOfType
+import org.jetbrains.kotlin.psi.psiUtil.getParentOfType
+import org.jetbrains.kotlin.psi.psiUtil.isAncestor
 import org.jetbrains.kotlin.resolve.BindingTrace
+import org.jetbrains.kotlin.resolve.DescriptorUtils
 import org.jetbrains.kotlin.resolve.MissingSupertypesResolver
 import org.jetbrains.kotlin.resolve.TemporaryBindingTrace
 import org.jetbrains.kotlin.resolve.calls.ArgumentTypeResolver
@@ -25,7 +34,10 @@ import org.jetbrains.kotlin.resolve.calls.model.*
 import org.jetbrains.kotlin.resolve.calls.tower.*
 import org.jetbrains.kotlin.resolve.calls.util.FakeCallableDescriptorForObject
 import org.jetbrains.kotlin.resolve.deprecation.DeprecationResolver
-import org.jetbrains.kotlin.types.*
+import org.jetbrains.kotlin.types.StubType
+import org.jetbrains.kotlin.types.TypeApproximator
+import org.jetbrains.kotlin.types.TypeConstructor
+import org.jetbrains.kotlin.types.UnwrappedType
 import org.jetbrains.kotlin.types.expressions.DoubleColonExpressionResolver
 import org.jetbrains.kotlin.types.expressions.ExpressionTypingServices
 import org.jetbrains.kotlin.types.typeUtil.contains
@@ -110,10 +122,24 @@ class CoroutineInferenceSession(
     }
 
     private fun skipCall(callInfo: SingleCallResolutionResult): Boolean {
+        val descriptor = callInfo.resultCallAtom.candidateDescriptor
+
         // FakeCallableDescriptorForObject can't introduce new information for inference,
         // so it's safe to complete it fully
-        val descriptor = callInfo.resultCallAtom.candidateDescriptor
-        return descriptor is FakeCallableDescriptorForObject
+        if (descriptor is FakeCallableDescriptorForObject) return true
+
+        // In this case temporary trace isn't committed during resolve of expressions like A::class, see resolveDoubleColonLHS
+        if (!DescriptorUtils.isObject(descriptor) && isInLHSOfDoubleColonExpression(callInfo)) return true
+
+        return false
+    }
+
+    private fun isInLHSOfDoubleColonExpression(callInfo: SingleCallResolutionResult): Boolean {
+        val callElement = callInfo.resultCallAtom.atom.psiKotlinCall.psiCall.callElement
+        val lhs = callElement.getParentOfType<KtDoubleColonExpression>(strict = false)?.lhs
+        if (lhs !is KtReferenceExpression && lhs !is KtDotQualifiedExpression) return false
+
+        return lhs.isAncestor(callElement)
     }
 
     override fun currentConstraintSystem(): ConstraintStorage {
@@ -313,6 +339,19 @@ class CoroutineInferenceSession(
             expressionTypingServices, argumentTypeResolver, doubleColonExpressionResolver, builtIns,
             deprecationResolver, moduleDescriptor, context.dataFlowValueFactory, typeApproximator, missingSupertypesResolver
         )
+    }
+
+    /*
+     * It's used only for `+=` resolve to clear calls info before the second analysis of right side.
+     * TODO: remove it after moving `+=` resolve into OR mechanism
+     */
+    fun clearCallsInfoByContainingElement(containingElement: KtElement) {
+        commonCalls.removeIf remove@{ callInfo ->
+            val atom = callInfo.callResolutionResult.resultCallAtom.atom
+            if (atom !is PSIKotlinCallImpl) return@remove false
+
+            containingElement.anyDescendantOfType<KtElement> { it == atom.psiCall.callElement }
+        }
     }
 }
 

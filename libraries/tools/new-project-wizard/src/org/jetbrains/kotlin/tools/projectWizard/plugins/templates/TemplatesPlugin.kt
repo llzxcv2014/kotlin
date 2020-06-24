@@ -1,20 +1,24 @@
 package org.jetbrains.kotlin.tools.projectWizard.plugins.templates
 
-import org.jetbrains.kotlin.tools.projectWizard.core.context.WritingContext
+
 import org.jetbrains.kotlin.tools.projectWizard.core.*
-import org.jetbrains.kotlin.tools.projectWizard.core.Defaults.KOTLIN_DIR
-import org.jetbrains.kotlin.tools.projectWizard.core.Defaults.RESOURCES_DIR
 import org.jetbrains.kotlin.tools.projectWizard.core.Defaults.SRC_DIR
+import org.jetbrains.kotlin.tools.projectWizard.core.service.TemplateEngineService
 import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.*
+import org.jetbrains.kotlin.tools.projectWizard.moduleConfigurators.ModuleConfiguratorWithTests
+import org.jetbrains.kotlin.tools.projectWizard.moduleConfigurators.isPresent
 import org.jetbrains.kotlin.tools.projectWizard.phases.GenerationPhase
 import org.jetbrains.kotlin.tools.projectWizard.plugins.buildSystem.BuildSystemPlugin
 import org.jetbrains.kotlin.tools.projectWizard.plugins.kotlin.KotlinPlugin
 import org.jetbrains.kotlin.tools.projectWizard.plugins.projectName
+import org.jetbrains.kotlin.tools.projectWizard.settings.buildsystem.SourcesetType
 import org.jetbrains.kotlin.tools.projectWizard.settings.buildsystem.updateBuildFiles
 import org.jetbrains.kotlin.tools.projectWizard.templates.*
 import org.jetbrains.kotlin.tools.projectWizard.transformers.interceptors.InterceptionPoint
 import org.jetbrains.kotlin.tools.projectWizard.transformers.interceptors.TemplateInterceptionApplicationState
 import org.jetbrains.kotlin.tools.projectWizard.transformers.interceptors.applyAll
+import org.jetbrains.kotlin.tools.projectWizard.moduleConfigurators.settingValue
+import java.nio.file.Path
 
 class TemplatesPlugin(context: Context) : Plugin(context) {
     val templates by property<Map<String, Template>>(
@@ -44,7 +48,7 @@ class TemplatesPlugin(context: Context) : Plugin(context) {
     val renderFileTemplates by pipelineTask(GenerationPhase.PROJECT_GENERATION) {
         runAfter(KotlinPlugin::createModules)
         withAction {
-            val templateEngine = VelocityTemplateEngine()
+            val templateEngine = service<TemplateEngineService>()
             TemplatesPlugin::fileTemplatesToRender.propertyValue.mapSequenceIgnore { template ->
                 with(templateEngine) { writeTemplate(template) }
             }
@@ -56,7 +60,6 @@ class TemplatesPlugin(context: Context) : Plugin(context) {
         runAfter(KotlinPlugin::createModules)
 
         withAction {
-            val templateEngine = VelocityTemplateEngine()
             updateBuildFiles { buildFile ->
                 buildFile.modules.modules.mapSequence { module ->
                     applyTemplateToModule(
@@ -94,7 +97,7 @@ class TemplatesPlugin(context: Context) : Plugin(context) {
                 }.flatten()
                     .applyAll(TemplateInterceptionApplicationState(buildFile, emptyMap()))
 
-                val templateEngine = VelocityTemplateEngine()
+                val templateEngine = service<TemplateEngineService>()
 
                 val templatesApplicationResult = modules.map { module ->
                     val settings = applicationState.moduleToSettings[module.originalModule.identificator].orEmpty()
@@ -106,9 +109,9 @@ class TemplatesPlugin(context: Context) : Plugin(context) {
         }
     }
 
-    private fun WritingContext.applyFileTemplatesFromSourceset(
+    private fun Writer.applyFileTemplatesFromSourceset(
         module: ModuleIR,
-        templateEngine: TemplateEngine,
+        templateEngine: TemplateEngineService,
         interceptionPointSettings: Map<InterceptionPoint<Any>, Any>
     ): TaskResult<Unit> {
         val template = module.template ?: return UNIT_SUCCESS
@@ -118,8 +121,8 @@ class TemplatesPlugin(context: Context) : Plugin(context) {
             putAll(interceptionPointSettings.mapKeys { it.key.name })
             putAll(defaultSettings(module))
         }
-        return with(template) { getFileTemplates(module) }.map { (fileTemplateDescriptor, filePath) ->
-            val path = generatePathForFileTemplate(module, filePath)
+        return with(template) { getFileTemplates(module) }.mapNotNull { (fileTemplateDescriptor, filePath) ->
+            val path = generatePathForFileTemplate(module, filePath) ?: return@mapNotNull null
             val fileTemplate = FileTemplate(
                 fileTemplateDescriptor,
                 module.path / path,
@@ -129,25 +132,32 @@ class TemplatesPlugin(context: Context) : Plugin(context) {
         }.sequenceIgnore()
     }
 
-    private fun WritingContext.defaultSettings(moduleIR: ModuleIR) = mapOf(
+    private fun Reader.defaultSettings(moduleIR: ModuleIR) = mapOf(
         "projectName" to projectName,
         "moduleName" to moduleIR.name
     )
 
-    private fun generatePathForFileTemplate(module: ModuleIR, filePath: FilePath) = when (module) {
-        is SingleplatformModuleIR -> {
-            when (filePath) {
-                is SrcFilePath -> SRC_DIR / filePath.sourcesetType.toString() / KOTLIN_DIR
-                is ResourcesFilePath -> SRC_DIR / filePath.sourcesetType.toString() / RESOURCES_DIR
+    private fun Reader.generatePathForFileTemplate(module: ModuleIR, filePath: FilePath): Path? {
+        if (filePath is SrcFilePath
+            && filePath.sourcesetType == SourcesetType.test
+            && settingValue(module.originalModule, ModuleConfiguratorWithTests.testFramework)?.isPresent != true
+        ) return null
+        val moduleConfigurator =  module.originalModule.configurator
+        return when (module) {
+            is SingleplatformModuleIR -> {
+                when (filePath) {
+                    is SrcFilePath -> SRC_DIR / filePath.sourcesetType.toString() / moduleConfigurator.kotlinDirectoryName
+                    is ResourcesFilePath -> SRC_DIR / filePath.sourcesetType.toString() / moduleConfigurator.resourcesDirectoryName
+                }
             }
-        }
 
-        is MultiplatformModuleIR -> {
-            val directory = when (filePath) {
-                is SrcFilePath -> KOTLIN_DIR
-                is ResourcesFilePath -> RESOURCES_DIR
+            is MultiplatformModuleIR -> {
+                val directory = when (filePath) {
+                    is SrcFilePath -> moduleConfigurator.kotlinDirectoryName
+                    is ResourcesFilePath -> moduleConfigurator.resourcesDirectoryName
+                }
+                SRC_DIR / "${module.name}${filePath.sourcesetType.name.capitalize()}" / directory
             }
-            SRC_DIR / "${module.name}${filePath.sourcesetType.name.capitalize()}" / directory
         }
     }
 }

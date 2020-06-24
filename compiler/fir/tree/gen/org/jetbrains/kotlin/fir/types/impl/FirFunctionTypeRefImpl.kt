@@ -25,6 +25,7 @@ internal class FirFunctionTypeRefImpl(
     override var receiverTypeRef: FirTypeRef?,
     override val valueParameters: MutableList<FirValueParameter>,
     override var returnTypeRef: FirTypeRef,
+    override val isSuspend: Boolean,
 ) : FirPureAbstractElement(), FirFunctionTypeRef {
     override fun <R, D> acceptChildren(visitor: FirVisitor<R, D>, data: D) {
         annotations.forEach { it.accept(visitor, data) }
@@ -34,10 +35,15 @@ internal class FirFunctionTypeRefImpl(
     }
 
     override fun <D> transformChildren(transformer: FirTransformer<D>, data: D): FirFunctionTypeRefImpl {
-        annotations.transformInplace(transformer, data)
+        transformAnnotations(transformer, data)
         receiverTypeRef = receiverTypeRef?.transformSingle(transformer, data)
         valueParameters.transformInplace(transformer, data)
         returnTypeRef = returnTypeRef.transformSingle(transformer, data)
+        return this
+    }
+
+    override fun <D> transformAnnotations(transformer: FirTransformer<D>, data: D): FirFunctionTypeRefImpl {
+        annotations.transformInplace(transformer, data)
         return this
     }
 }

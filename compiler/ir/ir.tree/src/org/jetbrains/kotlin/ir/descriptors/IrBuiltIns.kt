@@ -36,14 +36,13 @@ import org.jetbrains.kotlin.types.*
 class IrBuiltIns(
     val builtIns: KotlinBuiltIns,
     private val typeTranslator: TypeTranslator,
-    signaturer: IdSignatureComposer,
-    outerSymbolTable: SymbolTable? = null
+    private val symbolTable: SymbolTable
 ) {
     val languageVersionSettings = typeTranslator.languageVersionSettings
 
-    private val builtInsModule = builtIns.builtInsModule
+    lateinit var functionFactory: IrAbstractFunctionFactory
 
-    private val symbolTable = outerSymbolTable ?: SymbolTable(signaturer)
+    private val builtInsModule = builtIns.builtInsModule
 
     private val packageFragmentDescriptor = IrBuiltinsPackageFragmentDescriptorImpl(builtInsModule, KOTLIN_INTERNAL_IR_FQN)
     val packageFragment =
@@ -61,7 +60,7 @@ class IrBuiltIns(
             operatorDescriptor.addValueParameter(valueParameterDescriptor)
         }
 
-        val symbol = symbolTable.declareSimpleFunction(UNDEFINED_OFFSET, UNDEFINED_OFFSET, BUILTIN_OPERATOR, operatorDescriptor) {
+        val symbol = symbolTable.declareSimpleFunctionIfNotExists(operatorDescriptor) {
             val operator = IrBuiltInOperator(it, Name.identifier(name), returnType)
             operator.parent = packageFragment
             packageFragment.declarations += operator
@@ -135,7 +134,7 @@ class IrBuiltIns(
             buildSimpleType()
         }
 
-        return symbolTable.declareSimpleFunction(UNDEFINED_OFFSET, UNDEFINED_OFFSET, BUILTIN_OPERATOR, operatorDescriptor) {
+        return symbolTable.declareSimpleFunctionIfNotExists(operatorDescriptor) {
             val operator = IrBuiltInOperator(it, name, returnIrType)
             operator.parent = packageFragment
             packageFragment.declarations += operator
@@ -287,16 +286,18 @@ class IrBuiltIns(
 
     val checkNotNullSymbol = defineCheckNotNullOperator()
 
-    val checkNotNull = checkNotNullSymbol.descriptor
-
     private fun TypeConstructor.makeNonNullType() = KotlinTypeFactory.simpleType(Annotations.EMPTY, this, listOf(), false)
     private fun TypeConstructor.makeNullableType() = KotlinTypeFactory.simpleType(Annotations.EMPTY, this, listOf(), true)
 
     val dataClassArrayMemberHashCodeSymbol = defineOperator("dataClassArrayMemberHashCode", intType, listOf(anyType))
-    val dataClassArrayMemberHashCode = dataClassArrayMemberHashCodeSymbol.descriptor
 
     val dataClassArrayMemberToStringSymbol = defineOperator("dataClassArrayMemberToString", stringType, listOf(anyNType))
-    val dataClassArrayMemberToString = dataClassArrayMemberToStringSymbol.descriptor
+
+    fun function(n: Int): IrClassSymbol = functionFactory.functionN(n).symbol
+    fun suspendFunction(n: Int): IrClassSymbol = functionFactory.suspendFunctionN(n).symbol
+
+    fun kFunction(n: Int): IrClassSymbol = functionFactory.kFunctionN(n).symbol
+    fun kSuspendFunction(n: Int): IrClassSymbol = functionFactory.kSuspendFunctionN(n).symbol
 
     companion object {
         val KOTLIN_INTERNAL_IR_FQN = FqName("kotlin.internal.ir")

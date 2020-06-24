@@ -59,7 +59,7 @@ class PrivateMembersLowering(val context: JsIrBackendContext) : DeclarationTrans
                 symbol, name, visibility, modality,
                 returnType,
                 isInline = isInline, isExternal = isExternal, isTailrec = isTailrec, isSuspend = isSuspend, isExpect = isExpect,
-                isFakeOverride = origin == IrDeclarationOrigin.FAKE_OVERRIDE,
+                isFakeOverride = isFakeOverride,
                 isOperator = isOperator
             ).also {
                 descriptor.bind(it)
@@ -199,9 +199,11 @@ class PrivateMemberBodiesLowering(val context: JsIrBackendContext) : BodyLowerin
                 val newExpression = IrCallImpl(
                     expression.startOffset, expression.endOffset,
                     expression.type,
-                    staticTarget.symbol, expression.typeArgumentsCount,
-                    expression.origin,
-                    expression.superQualifierSymbol
+                    staticTarget.symbol,
+                    typeArgumentsCount = expression.typeArgumentsCount,
+                    valueArgumentsCount = expression.valueArgumentsCount + 1,
+                    origin = expression.origin,
+                    superQualifierSymbol = expression.superQualifierSymbol
                 )
 
                 newExpression.extensionReceiver = expression.extensionReceiver

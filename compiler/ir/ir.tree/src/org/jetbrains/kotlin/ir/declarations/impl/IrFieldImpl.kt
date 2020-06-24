@@ -18,6 +18,7 @@ package org.jetbrains.kotlin.ir.declarations.impl
 
 import org.jetbrains.kotlin.descriptors.PropertyDescriptor
 import org.jetbrains.kotlin.descriptors.Visibility
+import org.jetbrains.kotlin.ir.ObsoleteDescriptorBasedAPI
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.declarations.impl.carriers.FieldCarrier
 import org.jetbrains.kotlin.ir.expressions.IrExpressionBody
@@ -41,8 +42,7 @@ class IrFieldImpl(
     override val visibility: Visibility,
     override val isFinal: Boolean,
     override val isExternal: Boolean,
-    override val isStatic: Boolean,
-    override val isFakeOverride: Boolean
+    override val isStatic: Boolean
 ) : IrDeclarationBase<FieldCarrier>(startOffset, endOffset, origin),
     IrField,
     FieldCarrier {
@@ -51,32 +51,25 @@ class IrFieldImpl(
         startOffset: Int,
         endOffset: Int,
         origin: IrDeclarationOrigin,
-        symbol: IrFieldSymbol,
-        type: IrType,
-        visibility: Visibility = symbol.descriptor.visibility
-    ) :
-            this(
-                startOffset, endOffset, origin, symbol,
-                symbol.descriptor.name, type, visibility,
-                isFinal = !symbol.descriptor.isVar,
-                isExternal = symbol.descriptor.isEffectivelyExternal(),
-                isStatic = symbol.descriptor.dispatchReceiverParameter == null,
-                isFakeOverride = origin == IrDeclarationOrigin.FAKE_OVERRIDE
-            )
-
-    constructor(
-        startOffset: Int,
-        endOffset: Int,
-        origin: IrDeclarationOrigin,
         descriptor: PropertyDescriptor,
-        type: IrType
-    ) :
-            this(startOffset, endOffset, origin, IrFieldSymbolImpl(descriptor), type)
+        type: IrType,
+        name: Name = descriptor.name,
+        symbol: IrFieldSymbol = IrFieldSymbolImpl(descriptor),
+        visibility: Visibility = descriptor.visibility
+    ) : this(
+        startOffset, endOffset, origin, symbol,
+        name = name, type,
+        visibility = visibility,
+        isFinal = !descriptor.isVar,
+        isExternal = descriptor.isEffectivelyExternal(),
+        isStatic = descriptor.dispatchReceiverParameter == null
+    )
 
     init {
         symbol.bind(this)
     }
 
+    @ObsoleteDescriptorBasedAPI
     override val descriptor: PropertyDescriptor = symbol.descriptor
 
     override var initializerField: IrExpressionBody? = null
@@ -102,19 +95,9 @@ class IrFieldImpl(
             }
         }
 
-    override var overridenSymbolsField: List<IrFieldSymbol> = emptyList()
+    override var metadataField: MetadataSource? = null
 
-    override var overriddenSymbols: List<IrFieldSymbol>
-        get() = getCarrier().overridenSymbolsField
-        set(v) {
-            if (overriddenSymbols !== v) {
-                setCarrier().overridenSymbolsField = v
-            }
-        }
-
-    override var metadataField: MetadataSource.Property? = null
-
-    override var metadata: MetadataSource.Property?
+    override var metadata: MetadataSource?
         get() = getCarrier().metadataField
         set(v) {
             if (metadata !== v) {

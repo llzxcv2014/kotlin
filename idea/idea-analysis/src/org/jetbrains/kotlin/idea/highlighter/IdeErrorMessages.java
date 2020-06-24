@@ -129,7 +129,7 @@ public class IdeErrorMessages {
                 KotlinIdeaAnalysisBundle.htmlMessage("html.types.of.inherited.var.properties.do.not.match.br.0.br.1.html"),
                 HTML, HTML);
 
-        MAP.put(VAR_OVERRIDDEN_BY_VAL, KotlinIdeaAnalysisBundle.htmlMessage("html.val.property.cannot.override.var.property.br.1.html2"), HTML, HTML);
+        MAP.put(VAR_OVERRIDDEN_BY_VAL, KotlinIdeaAnalysisBundle.htmlMessage("html.val.property.cannot.override.var.property.br.1.html"), HTML, HTML);
         MAP.put(VAR_OVERRIDDEN_BY_VAL_BY_DELEGATION,
                 KotlinIdeaAnalysisBundle.htmlMessage("html.val.property.cannot.override.var.property.br.1.html"), HTML, HTML);
 
@@ -147,6 +147,9 @@ public class IdeErrorMessages {
         MAP.put(OVERLOAD_RESOLUTION_AMBIGUITY,
                 KotlinIdeaAnalysisBundle.htmlMessage("html.overload.resolution.ambiguity.all.these.functions.match.ul.0.ul.html"),
                 HTML_AMBIGUOUS_CALLS);
+        MAP.put(CALLABLE_REFERENCE_RESOLUTION_AMBIGUITY,
+                KotlinIdeaAnalysisBundle.htmlMessage("html.overload.resolution.ambiguity.all.these.functions.match.ul.0.ul.html"),
+                HTML_AMBIGUOUS_REFERENCES);
         MAP.put(NONE_APPLICABLE, KotlinIdeaAnalysisBundle.htmlMessage("html.none.of.the.following.functions.can.be.called.with.the.arguments.supplied.ul.0.ul.html"),
                 HTML_NONE_APPLICABLE_CALLS);
         MAP.put(CANNOT_COMPLETE_RESOLVE,
@@ -166,6 +169,10 @@ public class IdeErrorMessages {
         MAP.put(DELEGATE_PD_METHOD_NONE_APPLICABLE,
                 KotlinIdeaAnalysisBundle.htmlMessage("html.0.method.may.be.missing.none.of.the.following.functions.will.be.called.ul.1.ul.html"),
                 STRING, HTML_NONE_APPLICABLE_CALLS);
+
+        MAP.put(COMPATIBILITY_WARNING,
+                KotlinIdeaAnalysisBundle.htmlMessage("html.candidate.resolution.will.be.changed.please.invoke.explicitly.ul.0.ul.html"),
+                HTML_COMPATIBILITY_CANDIDATE);
 
         MAP.put(CONFLICTING_JVM_DECLARATIONS, KotlinIdeaAnalysisBundle.htmlMessage("html.platform.declaration.clash.0.html"), HTML_CONFLICTING_JVM_DECLARATIONS_DATA);
         MAP.put(ACCIDENTAL_OVERRIDE, KotlinIdeaAnalysisBundle.htmlMessage("html.accidental.override.0.html"), HTML_CONFLICTING_JVM_DECLARATIONS_DATA);

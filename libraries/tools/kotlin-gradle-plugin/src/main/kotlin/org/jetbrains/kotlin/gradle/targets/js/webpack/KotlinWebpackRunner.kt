@@ -1,6 +1,6 @@
 /*
- * Copyright 2010-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license
- * that can be found in the license/LICENSE.txt file.
+ * Copyright 2010-2020 JetBrains s.r.o. and Kotlin Programming Language contributors.
+ * Use of this source code is governed by the Apache 2.0 license that can be found in the license/LICENSE.txt file.
  */
 
 package org.jetbrains.kotlin.gradle.targets.js.webpack
@@ -8,7 +8,7 @@ package org.jetbrains.kotlin.gradle.targets.js.webpack
 import org.gradle.process.ExecSpec
 import org.gradle.process.internal.ExecHandle
 import org.gradle.process.internal.ExecHandleFactory
-import org.jetbrains.kotlin.gradle.internal.execWithProgress
+import org.jetbrains.kotlin.gradle.internal.execWithErrorLogger
 import org.jetbrains.kotlin.gradle.targets.js.npm.NpmProject
 import java.io.File
 
@@ -17,9 +17,11 @@ internal data class KotlinWebpackRunner(
     val configFile: File,
     val execHandleFactory: ExecHandleFactory,
     val tool: String,
+    val args: List<String>,
+    val nodeArgs: List<String>,
     val config: KotlinWebpackConfig
 ) {
-    fun execute() = npmProject.project.execWithProgress("webpack") {
+    fun execute() = npmProject.project.execWithErrorLogger("webpack") {
         configureExec(it)
     }
 
@@ -43,6 +45,13 @@ internal data class KotlinWebpackRunner(
             args.add("--progress")
         }
 
-        npmProject.useTool(execFactory, tool, *args.toTypedArray())
+        args.addAll(this.args)
+
+        npmProject.useTool(
+            execFactory,
+            tool,
+            nodeArgs,
+            args
+        )
     }
 }

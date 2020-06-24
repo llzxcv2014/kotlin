@@ -588,14 +588,12 @@ class KotlinGradleIT : BaseGradleIT() {
 
     @Test
     fun testNoUnnamedInputsOutputs() {
-        // Use a new Gradle version to enable the usage of the input/output builders, which are new API:
-        val gradleVersionRequirement = GradleVersionRequired.AtLeast("4.4")
 
         val projects = listOf(
-            Project("simpleProject", gradleVersionRequirement),
-            Project("kotlin2JsProject", gradleVersionRequirement),
-            Project("multiplatformProject", gradleVersionRequirement),
-            Project("simple", gradleVersionRequirement, "kapt2")
+            Project("simpleProject"),
+            Project("kotlin2JsProject"),
+            Project("multiplatformProject"),
+            Project("simple", directoryPrefix = "kapt2")
         )
 
         projects.forEach {
@@ -790,7 +788,7 @@ class KotlinGradleIT : BaseGradleIT() {
         val projects = listOf(
             Project("simpleProject"),
             Project("kotlin2JsNoOutputFileProject"),
-            Project("sample-app", directoryPrefix = "new-mpp-lib-and-app")
+            Project("sample-app", GradleVersionRequired.FOR_MPP_SUPPORT, "new-mpp-lib-and-app")
         )
 
         projects.forEach {
@@ -820,7 +818,7 @@ class KotlinGradleIT : BaseGradleIT() {
     }
 
     @Test
-    fun testKt29971() = with(Project("kt-29971", GradleVersionRequired.AtLeast("5.0"))) {
+    fun testKt29971() = with(Project("kt-29971", GradleVersionRequired.FOR_MPP_SUPPORT)) {
         build("jvm-app:build") {
             assertSuccessful()
             assertTasksExecuted(":jvm-app:compileKotlin")
@@ -828,7 +826,7 @@ class KotlinGradleIT : BaseGradleIT() {
     }
 
     @Test
-    fun testDetectingDifferentClassLoaders() = with(Project("kt-27059-pom-rewriting", GradleVersionRequired.AtLeast("4.10.2"))) {
+    fun testDetectingDifferentClassLoaders() = with(Project("kt-27059-pom-rewriting", GradleVersionRequired.FOR_MPP_SUPPORT)) {
         setupWorkingDir()
 
         val originalRootBuildScript = gradleBuildScript().readText()
@@ -894,7 +892,7 @@ class KotlinGradleIT : BaseGradleIT() {
     }
 
     @Test
-    fun testNewModelInOldJvmPlugin() = with(Project("new-model-in-old-plugin", GradleVersionRequired.AtLeast("4.10.2"))) {
+    fun testNewModelInOldJvmPlugin() = with(Project("new-model-in-old-plugin")) {
         setupWorkingDir()
         gradleBuildScript().modify(::transformBuildScriptWithPluginsDsl)
 
@@ -1006,7 +1004,7 @@ class KotlinGradleIT : BaseGradleIT() {
     }
 
     @Test
-    fun testKtKt35942InternalsFromMainInTestViaTransitiveDeps() = with(Project("kt-35942-jvm")) {
+    fun testKtKt35942InternalsFromMainInTestViaTransitiveDeps() = with(Project("kt-35942-jvm", GradleVersionRequired.FOR_MPP_SUPPORT)) {
         build(":lib1:compileTestKotlin") {
             assertSuccessful()
             assertTasksExecuted(":lib1:compileKotlin", ":lib2:jar")
@@ -1014,7 +1012,9 @@ class KotlinGradleIT : BaseGradleIT() {
     }
 
     @Test
-    fun testKtKt35942InternalsFromMainInTestViaTransitiveDepsAndroid() = with(Project("kt-35942-android")) {
+    fun testKtKt35942InternalsFromMainInTestViaTransitiveDepsAndroid() = with(
+        Project("kt-35942-android", GradleVersionRequired.FOR_MPP_SUPPORT)
+    ) {
         build(
             ":lib1:compileDebugUnitTestKotlin",
             options = defaultBuildOptions().copy(

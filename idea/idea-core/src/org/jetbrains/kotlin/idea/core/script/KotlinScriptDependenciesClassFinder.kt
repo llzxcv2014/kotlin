@@ -5,6 +5,7 @@
 
 package org.jetbrains.kotlin.idea.core.script
 
+import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.openapi.vfs.VirtualFile
@@ -19,11 +20,12 @@ class KotlinScriptDependenciesClassFinder(
     private val project: Project
 ) : NonClasspathClassFinder(project), KotlinSafeClassFinder {
     override fun calcClassRoots(): List<VirtualFile> = ScriptConfigurationManager.getInstance(project)
-        .getAllScriptsDependenciesClassFiles().toList()
+        .getAllScriptsDependenciesClassFiles().filter { it.isValid }.toList()
 
     override fun findClass(qualifiedName: String, scope: GlobalSearchScope): PsiClass? {
         tailrec fun findClassInner(parentQualifier: String, inners: List<String> = emptyList()): PsiClass? {
             if (parentQualifier.isEmpty()) return null
+            ProgressManager.checkCanceled()
             val parentClass = super.findClass(parentQualifier, scope)
             if (parentClass != null) {
                 if (inners.isNotEmpty()) {

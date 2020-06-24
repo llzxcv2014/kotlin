@@ -50,6 +50,15 @@ class Strings {
     }
 
     @Sample
+    fun chunked() {
+        val dnaFragment = "ATTCGCGGCCGCCAA"
+
+        val codons = dnaFragment.chunked(3)
+
+        assertPrints(codons, "[ATT, CGC, GGC, CGC, CAA]")
+    }
+
+    @Sample
     fun chunkedTransform() {
         val codonTable = mapOf("ATT" to "Isoleucine", "CAA" to "Glutamine", "CGC" to "Arginine", "GGC" to "Glycine")
         val dnaFragment = "ATTCGCGGCCGCCAA"
@@ -68,6 +77,24 @@ class Strings {
 
         // sequence is evaluated lazily, so that unknown codon is not reached
         assertPrints(proteins.take(5).toList(), "[Isoleucine, Arginine, Glycine, Arginine, Glutamine]")
+    }
+
+    @Sample
+    fun filter() {
+        val text = "a1b2c3d4e5"
+
+        val textWithOnlyDigits = text.filter { it.isDigit() }
+
+        assertPrints(textWithOnlyDigits, "12345")
+    }
+
+    @Sample
+    fun filterNot() {
+        val text = "a1b2c3d4e5"
+
+        val textWithoutDigits = text.filterNot { it.isDigit() }
+
+        assertPrints(textWithoutDigits, "abcde")
     }
 
     @Sample
@@ -159,6 +186,14 @@ class Strings {
         string.associateWithTo(result) { char -> char.toInt() }
         // notice each letter occurs only once
         assertPrints(result, "{b=98, o=111, n=110, e=101,  =32, j=106, u=117, r=114, é=233}")
+    }
+
+    @Sample
+    fun partition() {
+        fun isVowel(c: Char) = "aeuio".contains(c, ignoreCase = true)
+        val string = "Discussion"
+        val result = string.partition(::isVowel)
+        assertPrints(result, "(iuio, Dscssn)")
     }
 
     @Sample

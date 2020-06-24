@@ -18,6 +18,16 @@ abstract class ControlFlowGraphVisitor<out R, in D> {
         return visitNode(node, data)
     }
 
+    // ----------------------------------- Default arguments -----------------------------------
+
+    open fun visitExitDefaultArgumentsNode(node: ExitDefaultArgumentsNode, data: D): R {
+        return visitNode(node, data)
+    }
+
+    open fun visitEnterDefaultArgumentsNode(node: EnterDefaultArgumentsNode, data: D): R {
+        return visitNode(node, data)
+    }
+
     // ----------------------------------- Anonymous function -----------------------------------
 
     open fun visitPostponedLambdaEnterNode(node: PostponedLambdaEnterNode, data: D): R {
@@ -32,9 +42,21 @@ abstract class ControlFlowGraphVisitor<out R, in D> {
         return visitNode(node, data)
     }
 
-    // ----------------------------------- Anonymous object -----------------------------------
+    // ----------------------------------- Classes -----------------------------------
 
     open fun visitAnonymousObjectExitNode(node: AnonymousObjectExitNode, data: D): R {
+        return visitNode(node, data)
+    }
+
+    open fun visitClassEnterNode(node: ClassEnterNode, data: D): R {
+        return visitNode(node, data)
+    }
+
+    open fun visitClassExitNode(node: ClassExitNode, data: D): R {
+        return visitNode(node, data)
+    }
+
+    open fun visitLocalClassExitNode(node: LocalClassExitNode, data: D): R {
         return visitNode(node, data)
     }
 
@@ -254,6 +276,10 @@ abstract class ControlFlowGraphVisitor<out R, in D> {
     }
 
     open fun visitStubNode(node: StubNode, data: D): R {
+        return visitNode(node, data)
+    }
+
+    open fun visitContractDescriptionEnterNode(node: ContractDescriptionEnterNode, data: D): R {
         return visitNode(node, data)
     }
 

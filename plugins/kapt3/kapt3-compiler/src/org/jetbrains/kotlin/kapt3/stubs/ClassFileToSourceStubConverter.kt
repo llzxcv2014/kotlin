@@ -29,7 +29,6 @@ import org.jetbrains.kotlin.codegen.AsmUtil
 import org.jetbrains.kotlin.codegen.coroutines.CONTINUATION_PARAMETER_NAME
 import org.jetbrains.kotlin.codegen.needsExperimentalCoroutinesWrapper
 import org.jetbrains.kotlin.config.LanguageFeature
-import org.jetbrains.kotlin.config.LanguageVersionSettingsImpl
 import org.jetbrains.kotlin.descriptors.*
 import org.jetbrains.kotlin.descriptors.annotations.AnnotationDescriptor
 import org.jetbrains.kotlin.descriptors.annotations.Annotations
@@ -70,6 +69,7 @@ import org.jetbrains.org.objectweb.asm.Type
 import org.jetbrains.org.objectweb.asm.tree.*
 import java.io.File
 import javax.lang.model.element.ElementKind
+import kotlin.math.sign
 import com.sun.tools.javac.util.List as JavacList
 
 class ClassFileToSourceStubConverter(val kaptContext: KaptContextForStubGeneration, val generateNonExistentClass: Boolean) {
@@ -649,7 +649,12 @@ class ClassFileToSourceStubConverter(val kaptContext: KaptContextForStubGenerati
         val value = field.value
 
         val origin = kaptContext.origins[field]
-        val propertyInitializer = (origin?.element as? KtProperty)?.initializer
+
+        val propertyInitializer = when (val declaration = origin?.element) {
+            is KtProperty -> declaration.initializer
+            is KtParameter -> if (kaptContext.options[KaptFlag.DUMP_DEFAULT_PARAMETER_VALUES]) declaration.defaultValue else null
+            else -> null
+        }
 
         if (value != null) {
             if (propertyInitializer != null) {
@@ -661,12 +666,9 @@ class ClassFileToSourceStubConverter(val kaptContext: KaptContextForStubGenerati
 
         val propertyType = (origin?.descriptor as? PropertyDescriptor)?.returnType
         if (propertyInitializer != null && propertyType != null) {
-            val moduleDescriptor = kaptContext.generationState.module
-            val evaluator = ConstantExpressionEvaluator(moduleDescriptor, LanguageVersionSettingsImpl.DEFAULT, kaptContext.project)
-            val trace = DelegatingBindingTrace(kaptContext.bindingContext, "Kapt")
-            val const = evaluator.evaluateExpression(propertyInitializer, trace, propertyType)
-            if (const != null && !const.isError && const.canBeUsedInAnnotations && !const.usesNonConstValAsConstant) {
-                val asmValue = mapConstantValueToAsmRepresentation(const.toConstantValue(propertyType))
+            val constValue = getConstantValue(propertyInitializer, propertyType)
+            if (constValue != null) {
+                val asmValue = mapConstantValueToAsmRepresentation(constValue)
                 if (asmValue !== UnknownConstantValue) {
                     return convertConstantValueArguments(asmValue, listOf(propertyInitializer))
                 }
@@ -682,6 +684,18 @@ class ClassFileToSourceStubConverter(val kaptContext: KaptContextForStubGenerati
     }
 
     private object UnknownConstantValue
+
+    private fun getConstantValue(expression: KtExpression, expectedType: KotlinType): ConstantValue<*>? {
+        val moduleDescriptor = kaptContext.generationState.module
+        val languageVersionSettings = kaptContext.generationState.languageVersionSettings
+        val evaluator = ConstantExpressionEvaluator(moduleDescriptor, languageVersionSettings, kaptContext.project)
+        val trace = DelegatingBindingTrace(kaptContext.bindingContext, "Kapt")
+        val const = evaluator.evaluateExpression(expression, trace, expectedType)
+        if (const == null || const.isError || !const.canBeUsedInAnnotations || const.usesNonConstValAsConstant) {
+            return null
+        }
+        return const.toConstantValue(expectedType)
+    }
 
     private fun mapConstantValueToAsmRepresentation(value: ConstantValue<*>): Any? {
         return when (value) {
@@ -1178,11 +1192,22 @@ class ClassFileToSourceStubConverter(val kaptContext: KaptContextForStubGenerati
     }
 
     private fun convertValueOfPrimitiveTypeOrString(value: Any?): JCExpression? {
+        fun specialFpValueNumerator(value: Double): Double = if (value.isNaN()) 0.0 else 1.0 * value.sign
         return when (value) {
             is Char -> treeMaker.Literal(TypeTag.CHAR, value.toInt())
             is Byte -> treeMaker.TypeCast(treeMaker.TypeIdent(TypeTag.BYTE), treeMaker.Literal(TypeTag.INT, value.toInt()))
             is Short -> treeMaker.TypeCast(treeMaker.TypeIdent(TypeTag.SHORT), treeMaker.Literal(TypeTag.INT, value.toInt()))
-            is Boolean, is Int, is Long, is Float, is Double, is String -> treeMaker.Literal(value)
+            is Boolean, is Int, is Long, is String -> treeMaker.Literal(value)
+            is Float ->
+                when {
+                    value.isFinite() -> treeMaker.Literal(value)
+                    else -> treeMaker.Binary(Tag.DIV, treeMaker.Literal(specialFpValueNumerator(value.toDouble()).toFloat()), treeMaker.Literal(0.0F))
+                }
+            is Double ->
+                when {
+                    value.isFinite() -> treeMaker.Literal(value)
+                    else -> treeMaker.Binary(Tag.DIV, treeMaker.Literal(specialFpValueNumerator(value)), treeMaker.Literal(0.0))
+                }
             else -> null
         }
     }

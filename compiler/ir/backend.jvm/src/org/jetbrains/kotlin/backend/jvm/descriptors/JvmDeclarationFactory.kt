@@ -7,9 +7,12 @@ package org.jetbrains.kotlin.backend.jvm.descriptors
 
 import org.jetbrains.kotlin.backend.common.DescriptorsToIrRemapper
 import org.jetbrains.kotlin.backend.common.ir.*
+import org.jetbrains.kotlin.backend.common.lower.createIrBuilder
+import org.jetbrains.kotlin.backend.jvm.JvmBackendContext
 import org.jetbrains.kotlin.backend.jvm.JvmLoweredDeclarationOrigin
 import org.jetbrains.kotlin.backend.jvm.codegen.MethodSignatureMapper
 import org.jetbrains.kotlin.backend.jvm.codegen.isJvmInterface
+import org.jetbrains.kotlin.backend.jvm.ir.copyCorrespondingPropertyFrom
 import org.jetbrains.kotlin.backend.jvm.ir.replaceThisByStaticReference
 import org.jetbrains.kotlin.builtins.CompanionObjectMapping.isMappedIntrinsicCompanionObject
 import org.jetbrains.kotlin.codegen.AsmUtil
@@ -20,21 +23,30 @@ import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.descriptors.Visibilities
 import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.builders.declarations.buildField
+import org.jetbrains.kotlin.ir.builders.irCall
 import org.jetbrains.kotlin.ir.builders.setSourceRange
 import org.jetbrains.kotlin.ir.declarations.*
-import org.jetbrains.kotlin.ir.declarations.impl.*
+import org.jetbrains.kotlin.ir.declarations.impl.IrClassImpl
+import org.jetbrains.kotlin.ir.declarations.impl.IrConstructorImpl
+import org.jetbrains.kotlin.ir.declarations.impl.IrFunctionImpl
+import org.jetbrains.kotlin.ir.declarations.impl.IrValueParameterImpl
 import org.jetbrains.kotlin.ir.descriptors.WrappedClassConstructorDescriptor
 import org.jetbrains.kotlin.ir.descriptors.WrappedClassDescriptor
 import org.jetbrains.kotlin.ir.descriptors.WrappedValueParameterDescriptor
 import org.jetbrains.kotlin.ir.expressions.IrExpressionBody
-import org.jetbrains.kotlin.ir.symbols.impl.*
+import org.jetbrains.kotlin.ir.symbols.impl.IrClassSymbolImpl
+import org.jetbrains.kotlin.ir.symbols.impl.IrConstructorSymbolImpl
+import org.jetbrains.kotlin.ir.symbols.impl.IrSimpleFunctionSymbolImpl
+import org.jetbrains.kotlin.ir.symbols.impl.IrValueParameterSymbolImpl
 import org.jetbrains.kotlin.ir.util.*
 import org.jetbrains.kotlin.load.java.JavaVisibilities
 import org.jetbrains.kotlin.load.java.JvmAbi
 import org.jetbrains.kotlin.name.Name
+import org.jetbrains.kotlin.resolve.deprecation.DeprecationResolver
 import java.util.*
 
 class JvmDeclarationFactory(
+    private val context: JvmBackendContext,
     private val methodSignatureMapper: MethodSignatureMapper,
     private val languageVersionSettings: LanguageVersionSettings
 ) : DeclarationFactory {
@@ -139,6 +151,7 @@ class JvmDeclarationFactory(
 
     override fun getFieldForObjectInstance(singleton: IrClass): IrField =
         singletonFieldDeclarations.getOrPut(singleton) {
+            val originalVisibility = singleton.visibility
             val isNotMappedCompanion = singleton.isCompanion && !isMappedIntrinsicCompanionObject(singleton.descriptor)
             val useProperVisibilityForCompanion =
                 languageVersionSettings.supportsFeature(LanguageFeature.ProperVisibilityForCompanionObjectInstanceField)
@@ -152,9 +165,10 @@ class JvmDeclarationFactory(
                 isStatic = true
                 visibility = when {
                     !useProperVisibilityForCompanion -> Visibilities.PUBLIC
-                    singleton.visibility == Visibilities.PROTECTED -> JavaVisibilities.PROTECTED_STATIC_VISIBILITY
-                    else -> singleton.visibility
+                    originalVisibility == Visibilities.PROTECTED -> JavaVisibilities.PROTECTED_STATIC_VISIBILITY
+                    else -> originalVisibility
                 }
+
             }.apply {
                 parent = if (isNotMappedCompanion) singleton.parent else singleton
             }
@@ -180,7 +194,7 @@ class JvmDeclarationFactory(
     fun getStaticBackingField(irProperty: IrProperty): IrField? {
         // Only fields defined directly in objects should be made static.
         // Fake overrides never point to those, as objects are final.
-        if (irProperty.origin == IrDeclarationOrigin.FAKE_OVERRIDE) return null
+        if (irProperty.isFakeOverride) return null
         val oldField = irProperty.backingField ?: return null
         val oldParent = irProperty.parent as? IrClass ?: return null
         if (!oldParent.isObject) return null
@@ -207,9 +221,10 @@ class JvmDeclarationFactory(
         }
     }
 
-    fun getDefaultImplsFunction(interfaceFun: IrSimpleFunction): IrSimpleFunction {
+    fun getDefaultImplsFunction(interfaceFun: IrSimpleFunction, forCompatibilityMode: Boolean = false): IrSimpleFunction {
         val parent = interfaceFun.parentAsClass
         assert(parent.isJvmInterface) { "Parent of ${interfaceFun.dump()} should be interface" }
+        assert(!forCompatibilityMode || !defaultImplsMethods.containsKey(interfaceFun)) { "DefaultImpls stub in compatibility mode should be requested only once from interface lowering: ${interfaceFun.dump()}" }
         return defaultImplsMethods.getOrPut(interfaceFun) {
             val defaultImpls = getDefaultImplsClass(interfaceFun.parentAsClass)
 
@@ -226,9 +241,13 @@ class JvmDeclarationFactory(
                 // is supposed to allow using `I2.DefaultImpls.f` as if it was inherited from `I1.DefaultImpls`.
                 // The classes are not actually related and `I2.DefaultImpls.f` is not a fake override but a bridge.
                 origin = when {
-                    interfaceFun.origin != IrDeclarationOrigin.FAKE_OVERRIDE -> interfaceFun.origin
-                    interfaceFun.resolveFakeOverride()!!.origin.isSynthetic -> JvmLoweredDeclarationOrigin.DEFAULT_IMPLS_BRIDGE_TO_SYNTHETIC
-                    else -> JvmLoweredDeclarationOrigin.DEFAULT_IMPLS_BRIDGE
+                    !forCompatibilityMode && !interfaceFun.isFakeOverride -> interfaceFun.origin
+                    interfaceFun.resolveFakeOverride()!!.origin.isSynthetic ->
+                        if (forCompatibilityMode) JvmLoweredDeclarationOrigin.DEFAULT_IMPLS_BRIDGE_FOR_COMPATIBILITY_SYNTHETIC
+                        else JvmLoweredDeclarationOrigin.DEFAULT_IMPLS_BRIDGE_TO_SYNTHETIC
+                    else ->
+                        if (forCompatibilityMode) JvmLoweredDeclarationOrigin.DEFAULT_IMPLS_BRIDGE_FOR_COMPATIBILITY
+                        else JvmLoweredDeclarationOrigin.DEFAULT_IMPLS_BRIDGE
                 },
                 // Old backend doesn't generate ACC_FINAL on DefaultImpls methods.
                 modality = Modality.OPEN,
@@ -238,8 +257,17 @@ class JvmDeclarationFactory(
                 // We should rather not generate a bridge to clone when interface inherits from Cloneable at all.
                 visibility = if (interfaceFun.visibility == Visibilities.PRIVATE) Visibilities.PRIVATE else Visibilities.PUBLIC,
 
+                isFakeOverride = false,
                 typeParametersFromContext = parent.typeParameters
-            )
+            ).also {
+                if (it.origin == JvmLoweredDeclarationOrigin.DEFAULT_IMPLS_BRIDGE_FOR_COMPATIBILITY &&
+                    !it.annotations.hasAnnotation(DeprecationResolver.JAVA_DEPRECATED)
+                ) {
+                    this@JvmDeclarationFactory.context.createIrBuilder(it.symbol).run {
+                        it.annotations += irCall(this@JvmDeclarationFactory.context.ir.symbols.javaLangDeprecatedConstructor)
+                    }
+                }
+            }
         }
     }
 
@@ -253,14 +281,7 @@ class JvmDeclarationFactory(
                 Name.identifier(JvmAbi.DEFAULT_IMPLS_CLASS_NAME),
                 ClassKind.CLASS,
                 Visibilities.PUBLIC,
-                Modality.FINAL,
-                isCompanion = false,
-                isInner = false,
-                isData = false,
-                isExternal = false,
-                isInline = false,
-                isExpect = false,
-                isFun = false
+                Modality.FINAL
             ).apply {
                 descriptor.bind(this)
                 parent = interfaceClass
@@ -270,7 +291,7 @@ class JvmDeclarationFactory(
 
     fun getDefaultImplsRedirection(fakeOverride: IrSimpleFunction): IrSimpleFunction =
         defaultImplsRedirections.getOrPut(fakeOverride) {
-            assert(fakeOverride.origin == IrDeclarationOrigin.FAKE_OVERRIDE)
+            assert(fakeOverride.isFakeOverride)
             val irClass = fakeOverride.parentAsClass
             val descriptor = DescriptorsToIrRemapper.remapDeclaredSimpleFunction(fakeOverride.descriptor)
             with(fakeOverride) {
@@ -291,23 +312,7 @@ class JvmDeclarationFactory(
                     overriddenSymbols = fakeOverride.overriddenSymbols
                     copyParameterDeclarationsFrom(fakeOverride)
                     annotations = fakeOverride.annotations
-                    fakeOverride.correspondingPropertySymbol?.owner?.let { fakeOverrideProperty ->
-                        // NB: property is only generated for the sake of the type mapper.
-                        // If both setter and getter are present, original property will be duplicated.
-                        val newPropertyDescriptor = DescriptorsToIrRemapper.remapDeclaredProperty(fakeOverrideProperty.descriptor)
-                        correspondingPropertySymbol = with(fakeOverrideProperty) {
-                            IrPropertyImpl(
-                                UNDEFINED_OFFSET, UNDEFINED_OFFSET,
-                                IrDeclarationOrigin.DEFINED, IrPropertySymbolImpl(newPropertyDescriptor),
-                                name, visibility, modality, isVar, isConst, isLateinit, isDelegated,
-                                isExternal = false,
-                                isExpect = isExpect
-                            ).apply {
-                                newPropertyDescriptor.bind(this)
-                                parent = irClass
-                            }.symbol
-                        }
-                    }
+                    copyCorrespondingPropertyFrom(fakeOverride)
                 }
             }
 

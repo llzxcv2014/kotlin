@@ -30,12 +30,9 @@ open class KotlinMultiplatformExtension :
     val testableTargets: NamedDomainObjectCollection<KotlinTargetWithTests<*, *>>
         get() = targets.withType(KotlinTargetWithTests::class.java)
 
-    internal var isGradleMetadataAvailable: Boolean = false
-    internal var isGradleMetadataExperimental: Boolean = false
-
-    fun metadata(configure: KotlinOnlyTarget<KotlinCommonCompilation>.() -> Unit = { }): KotlinOnlyTarget<KotlinCommonCompilation> =
+    fun metadata(configure: KotlinOnlyTarget<AbstractKotlinCompilation<*>>.() -> Unit = { }): KotlinOnlyTarget<AbstractKotlinCompilation<*>> =
         @Suppress("UNCHECKED_CAST")
-        (targets.getByName(KotlinMultiplatformPlugin.METADATA_TARGET_NAME) as KotlinOnlyTarget<KotlinCommonCompilation>).also(configure)
+        (targets.getByName(KotlinMultiplatformPlugin.METADATA_TARGET_NAME) as KotlinOnlyTarget<AbstractKotlinCompilation<*>>).also(configure)
 
     fun metadata(configure: Closure<*>) = metadata { ConfigureUtil.configure(configure, this) }
 

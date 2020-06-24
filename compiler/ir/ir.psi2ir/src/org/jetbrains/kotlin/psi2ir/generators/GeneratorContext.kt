@@ -12,7 +12,7 @@ import org.jetbrains.kotlin.descriptors.ModuleDescriptor
 import org.jetbrains.kotlin.descriptors.NotFoundClasses
 import org.jetbrains.kotlin.ir.builders.IrGeneratorContext
 import org.jetbrains.kotlin.ir.descriptors.IrBuiltIns
-import org.jetbrains.kotlin.ir.expressions.IrMemberAccessExpression
+import org.jetbrains.kotlin.ir.expressions.IrDeclarationReference
 import org.jetbrains.kotlin.ir.util.ConstantValueGenerator
 import org.jetbrains.kotlin.ir.util.IdSignatureComposer
 import org.jetbrains.kotlin.ir.util.SymbolTable
@@ -28,10 +28,11 @@ fun createGeneratorContext(
     bindingContext: BindingContext,
     languageVersionSettings: LanguageVersionSettings,
     symbolTable: SymbolTable,
-    extensions: GeneratorExtensions,
-    signaturer: IdSignatureComposer
+    extensions: GeneratorExtensions
 ): GeneratorContext {
-    val typeTranslator = TypeTranslator(symbolTable, languageVersionSettings, builtIns = moduleDescriptor.builtIns)
+    val typeTranslator = TypeTranslator(
+        symbolTable, languageVersionSettings, builtIns = moduleDescriptor.builtIns, extensions = extensions
+    )
     val constantValueGenerator = ConstantValueGenerator(moduleDescriptor, symbolTable)
     typeTranslator.constantValueGenerator = constantValueGenerator
     constantValueGenerator.typeTranslator = typeTranslator
@@ -44,7 +45,7 @@ fun createGeneratorContext(
         extensions,
         typeTranslator,
         constantValueGenerator,
-        IrBuiltIns(moduleDescriptor.builtIns, typeTranslator, signaturer, symbolTable)
+        IrBuiltIns(moduleDescriptor.builtIns, typeTranslator, symbolTable)
     )
 }
 
@@ -58,16 +59,16 @@ class GeneratorContext(
     val typeTranslator: TypeTranslator,
     val constantValueGenerator: ConstantValueGenerator,
     override val irBuiltIns: IrBuiltIns
-) : IrGeneratorContext() {
+) : IrGeneratorContext {
 
-    val callToSubstitutedDescriptorMap = mutableMapOf<IrMemberAccessExpression, CallableDescriptor>()
+    val callToSubstitutedDescriptorMap = mutableMapOf<IrDeclarationReference, CallableDescriptor>()
 
     val sourceManager = PsiSourceManager()
 
     // TODO: inject a correct StorageManager instance, or store NotFoundClasses inside ModuleDescriptor
     val reflectionTypes = ReflectionTypes(moduleDescriptor, NotFoundClasses(LockBasedStorageManager.NO_LOCKS, moduleDescriptor))
 
-    fun IrMemberAccessExpression.commitSubstituted(descriptor: CallableDescriptor) {
+    fun IrDeclarationReference.commitSubstituted(descriptor: CallableDescriptor) {
         callToSubstitutedDescriptorMap[this] = descriptor
     }
 }

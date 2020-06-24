@@ -1,11 +1,14 @@
 package org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.gradle.multiplatform
 
 import kotlinx.collections.immutable.PersistentList
+import kotlinx.collections.immutable.toPersistentList
 import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.BuildSystemIR
 import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.IrsOwner
 import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.KotlinIR
 import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.gradle.GradleCallIr
 import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.gradle.GradleIR
+import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.gradle.IRsListBuilderFunction
+import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.gradle.build
 import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.withIrs
 import org.jetbrains.kotlin.tools.projectWizard.plugins.kotlin.ModuleSubType
 import org.jetbrains.kotlin.tools.projectWizard.plugins.printer.GradlePrinter
@@ -31,7 +34,9 @@ interface TargetConfigurationIR : MultiplatformIR, IrsOwner {
 }
 
 fun TargetConfigurationIR.addWithJavaIntoJvmTarget() = when {
-    this is DefaultTargetConfigurationIR && targetAccess.type == ModuleSubType.jvm ->
+    this is DefaultTargetConfigurationIR
+            && targetAccess.type == ModuleSubType.jvm
+            && irs.none { it is GradleCallIr } ->
         withIrs(GradleCallIr("withJava"))
     else -> this
 }
@@ -42,6 +47,9 @@ data class DefaultTargetConfigurationIR(
 ) : TargetConfigurationIR {
     override val targetName: String
         get() = targetAccess.nonDefaultName ?: targetAccess.type.name
+
+    constructor(targetAccess: TargetAccessIR, irs: IRsListBuilderFunction)
+            : this(targetAccess, irs.build().toPersistentList())
 
     override fun withReplacedIrs(irs: PersistentList<BuildSystemIR>): DefaultTargetConfigurationIR =
         copy(irs = irs)
@@ -64,6 +72,9 @@ data class NonDefaultTargetConfigurationIR(
 ) : TargetConfigurationIR {
     override fun withReplacedIrs(irs: PersistentList<BuildSystemIR>): NonDefaultTargetConfigurationIR =
         copy(irs = irs)
+
+    constructor(variableName: String, targetName: String, irs: IRsListBuilderFunction)
+            : this(variableName, targetName, irs.build().toPersistentList())
 
     override fun GradlePrinter.renderGradle() {
         if (irs.isNotEmpty()) {

@@ -19,11 +19,11 @@ fun Candidate.preprocessLambdaArgument(
     csBuilder: ConstraintSystemBuilder,
     argument: FirAnonymousFunction,
     expectedType: ConeKotlinType?,
-    expectedTypeRef: FirTypeRef,
+    expectedTypeRef: FirTypeRef?,
     forceResolution: Boolean = false,
     returnTypeVariable: ConeTypeVariableForLambdaReturnType? = null
 ): PostponedResolvedAtom {
-    if (expectedType != null && !forceResolution && csBuilder.isTypeVariable(expectedType)) {
+    if (expectedType != null && expectedTypeRef != null && !forceResolution && csBuilder.isTypeVariable(expectedType)) {
         return LambdaWithTypeVariableAsExpectedTypeAtom(argument, expectedType, expectedTypeRef, this)
     }
 
@@ -33,7 +33,12 @@ fun Candidate.preprocessLambdaArgument(
 
     if (expectedType != null) {
         // TODO: add SAM conversion processing
-        val lambdaType = createFunctionalType(resolvedArgument.parameters, resolvedArgument.receiver, resolvedArgument.returnType)
+        val lambdaType = createFunctionalType(
+            resolvedArgument.parameters,
+            resolvedArgument.receiver,
+            resolvedArgument.returnType,
+            isSuspend = resolvedArgument.isSuspend
+        )
         csBuilder.addSubtypeConstraint(lambdaType, expectedType, SimpleConstraintSystemConstraintPosition)
     }
 
@@ -42,7 +47,7 @@ fun Candidate.preprocessLambdaArgument(
 
 fun Candidate.preprocessCallableReference(
     argument: FirCallableReferenceAccess,
-    expectedType: ConeKotlinType
+    expectedType: ConeKotlinType?
 ) {
     val lhs = bodyResolveComponents.doubleColonExpressionResolver.resolveDoubleColonLHS(argument)
     postponedAtoms += ResolvedCallableReferenceAtom(argument, expectedType, lhs, bodyResolveComponents.session)

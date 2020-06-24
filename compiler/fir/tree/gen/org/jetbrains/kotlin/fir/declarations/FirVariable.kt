@@ -22,10 +22,12 @@ import org.jetbrains.kotlin.fir.visitors.*
  * DO NOT MODIFY IT MANUALLY
  */
 
-abstract class FirVariable<F : FirVariable<F>> : FirPureAbstractElement(), FirCallableDeclaration<F>, FirDeclaration, FirStatement {
+abstract class FirVariable<F : FirVariable<F>> : FirPureAbstractElement(), FirCallableDeclaration<F>, FirAnnotatedDeclaration, FirStatement {
     abstract override val source: FirSourceElement?
     abstract override val session: FirSession
     abstract override val resolvePhase: FirResolvePhase
+    abstract override val origin: FirDeclarationOrigin
+    abstract override val attributes: FirDeclarationAttributes
     abstract override val returnTypeRef: FirTypeRef
     abstract override val receiverTypeRef: FirTypeRef?
     abstract val name: Name
@@ -41,6 +43,12 @@ abstract class FirVariable<F : FirVariable<F>> : FirPureAbstractElement(), FirCa
 
     override fun <R, D> accept(visitor: FirVisitor<R, D>, data: D): R = visitor.visitVariable(this, data)
 
+    abstract override fun replaceResolvePhase(newResolvePhase: FirResolvePhase)
+
+    abstract override fun replaceReturnTypeRef(newReturnTypeRef: FirTypeRef)
+
+    abstract override fun replaceReceiverTypeRef(newReceiverTypeRef: FirTypeRef?)
+
     abstract override fun <D> transformReturnTypeRef(transformer: FirTransformer<D>, data: D): FirVariable<F>
 
     abstract override fun <D> transformReceiverTypeRef(transformer: FirTransformer<D>, data: D): FirVariable<F>
@@ -52,6 +60,8 @@ abstract class FirVariable<F : FirVariable<F>> : FirPureAbstractElement(), FirCa
     abstract fun <D> transformGetter(transformer: FirTransformer<D>, data: D): FirVariable<F>
 
     abstract fun <D> transformSetter(transformer: FirTransformer<D>, data: D): FirVariable<F>
+
+    abstract override fun <D> transformAnnotations(transformer: FirTransformer<D>, data: D): FirVariable<F>
 
     abstract fun <D> transformOtherChildren(transformer: FirTransformer<D>, data: D): FirVariable<F>
 }

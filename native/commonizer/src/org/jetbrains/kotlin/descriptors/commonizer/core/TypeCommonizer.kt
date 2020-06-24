@@ -5,20 +5,16 @@
 
 package org.jetbrains.kotlin.descriptors.commonizer.core
 
-import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.ir.*
+import org.jetbrains.kotlin.descriptors.commonizer.cir.CirFlexibleType
+import org.jetbrains.kotlin.descriptors.commonizer.cir.CirSimpleType
+import org.jetbrains.kotlin.descriptors.commonizer.cir.CirSimpleTypeKind
+import org.jetbrains.kotlin.descriptors.commonizer.cir.CirType
+import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.CirClassifiersCache
+import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.CirNode
 import org.jetbrains.kotlin.descriptors.commonizer.utils.isUnderStandardKotlinPackages
 import org.jetbrains.kotlin.types.AbstractStrictEqualityTypeChecker
 
-interface TypeCommonizer : Commonizer<CirType, CirType> {
-    companion object {
-        fun default(cache: CirClassifiersCache): TypeCommonizer = DefaultTypeCommonizer(cache)
-    }
-}
-
-private class DefaultTypeCommonizer(private val cache: CirClassifiersCache) :
-    TypeCommonizer,
-    AbstractStandardCommonizer<CirType, CirType>() {
-
+class TypeCommonizer(private val cache: CirClassifiersCache) : AbstractStandardCommonizer<CirType, CirType>() {
     private lateinit var temp: CirType
 
     override fun commonizationResult() = temp
@@ -33,6 +29,7 @@ private class DefaultTypeCommonizer(private val cache: CirClassifiersCache) :
 /**
  * See also [AbstractStrictEqualityTypeChecker].
  */
+@Suppress("IntroduceWhenSubject")
 internal fun areTypesEqual(cache: CirClassifiersCache, a: CirType, b: CirType): Boolean = when {
     a is CirSimpleType -> (b is CirSimpleType) && areSimpleTypesEqual(cache, a, b)
     a is CirFlexibleType -> (b is CirFlexibleType)
@@ -53,12 +50,7 @@ private fun areSimpleTypesEqual(cache: CirClassifiersCache, a: CirSimpleType, b:
 
     fun isClassOrTypeAliasUnderStandardKotlinPackages() =
         // N.B. only for descriptors that represent classes or type aliases, but not type parameters!
-        a.isClassOrTypeAlias && b.isClassOrTypeAlias
-                && a.fqName.isUnderStandardKotlinPackages
-                // If classes are from the standard Kotlin packages, compare them only by type constructors.
-                // Effectively, this includes comparison of 1) FQ names of underlying descriptors and 2) number of type constructor parameters.
-                // See org.jetbrains.kotlin.types.AbstractClassTypeConstructor.equals() for details.
-                && (a === b || a.expandedTypeConstructorId == b.expandedTypeConstructorId)
+        a.isClassOrTypeAlias && b.isClassOrTypeAlias && a.fqName.isUnderStandardKotlinPackages
 
     fun descriptorsCanBeCommonizedThemselves() =
         a.kind == b.kind && when (a.kind) {
@@ -106,5 +98,5 @@ private inline fun CirNode<*, *>?.canBeCommonized() =
         true
     } else {
         // If entry is present, then contents (common declaration) should not be null.
-        common() != null
+        commonDeclaration() != null
     }

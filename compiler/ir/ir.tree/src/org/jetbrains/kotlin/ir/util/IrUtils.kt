@@ -7,6 +7,7 @@ package org.jetbrains.kotlin.ir.util
 
 import org.jetbrains.kotlin.descriptors.*
 import org.jetbrains.kotlin.descriptors.impl.DeclarationDescriptorVisitorEmptyBodies
+import org.jetbrains.kotlin.ir.ObsoleteDescriptorBasedAPI
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.declarations.*
@@ -34,6 +35,7 @@ import org.jetbrains.kotlin.utils.addToStdlib.safeAs
  * Binds the arguments explicitly represented in the IR to the parameters of the accessed function.
  * The arguments are to be evaluated in the same order as they appear in the resulting list.
  */
+@ObsoleteDescriptorBasedAPI
 fun IrMemberAccessExpression.getArguments(): List<Pair<ParameterDescriptor, IrExpression>> {
     val res = mutableListOf<Pair<ParameterDescriptor, IrExpression>>()
     val descriptor = symbol.descriptor as CallableDescriptor
@@ -62,6 +64,7 @@ fun IrMemberAccessExpression.getArguments(): List<Pair<ParameterDescriptor, IrEx
  * Binds the arguments explicitly represented in the IR to the parameters of the accessed function.
  * The arguments are to be evaluated in the same order as they appear in the resulting list.
  */
+@ObsoleteDescriptorBasedAPI
 fun IrFunctionAccessExpression.getArgumentsWithSymbols(): List<Pair<IrValueParameterSymbol, IrExpression>> {
     val res = mutableListOf<Pair<IrValueParameterSymbol, IrExpression>>()
     val irFunction = symbol.owner
@@ -121,6 +124,7 @@ fun IrMemberAccessExpression.getArgumentsWithIr(): List<Pair<IrValueParameter, I
 /**
  * Sets arguments that are specified by given mapping of parameters.
  */
+@ObsoleteDescriptorBasedAPI
 fun IrMemberAccessExpression.addArguments(args: Map<ParameterDescriptor, IrExpression>) {
     val descriptor = symbol.descriptor as CallableDescriptor
     descriptor.dispatchReceiverParameter?.let {
@@ -145,6 +149,7 @@ fun IrMemberAccessExpression.addArguments(args: Map<ParameterDescriptor, IrExpre
     }
 }
 
+@ObsoleteDescriptorBasedAPI
 fun IrMemberAccessExpression.addArguments(args: List<Pair<ParameterDescriptor, IrExpression>>) =
     this.addArguments(args.toMap())
 
@@ -154,14 +159,19 @@ fun IrExpression.isTrueConst() = this is IrConst<*> && this.kind == IrConstKind.
 
 fun IrExpression.isFalseConst() = this is IrConst<*> && this.kind == IrConstKind.Boolean && this.value == false
 
+fun IrExpression.isIntegerConst(value: Int) = this is IrConst<*> && this.kind == IrConstKind.Int && this.value == value
+
+@OptIn(ObsoleteDescriptorBasedAPI::class)
 fun IrExpression.coerceToUnit(builtins: IrBuiltIns): IrExpression {
     val valueType = getKotlinType(this)
     return coerceToUnitIfNeeded(valueType, builtins)
 }
 
+@ObsoleteDescriptorBasedAPI
 private fun getKotlinType(irExpression: IrExpression) =
     irExpression.type.toKotlinType()
 
+@ObsoleteDescriptorBasedAPI
 fun IrExpression.coerceToUnitIfNeeded(valueType: KotlinType, irBuiltIns: IrBuiltIns): IrExpression {
     return if (KotlinTypeChecker.DEFAULT.isSubtypeOf(valueType, irBuiltIns.unitType.toKotlinType()))
         this
@@ -188,6 +198,7 @@ fun IrExpression.coerceToUnitIfNeeded(valueType: IrType, irBuiltIns: IrBuiltIns)
         )
 }
 
+@ObsoleteDescriptorBasedAPI
 fun IrMemberAccessExpression.usesDefaultArguments(): Boolean =
     (symbol.descriptor as CallableDescriptor).valueParameters.any { this.getValueArgument(it) == null }
 
@@ -232,18 +243,6 @@ val IrBody.statements: List<IrStatement>
 val IrClass.defaultType: IrSimpleType
     get() = this.thisReceiver!!.type as IrSimpleType
 
-val IrSimpleFunction.isSynthesized: Boolean get() = descriptor.kind == CallableMemberDescriptor.Kind.SYNTHESIZED
-
-val IrDeclaration.isReal: Boolean get() = !isFakeOverride
-
-val IrDeclaration.isFakeOverride: Boolean
-    get() = when (this) {
-        is IrSimpleFunction -> isFakeOverride
-        is IrProperty -> isFakeOverride
-        is IrField -> isFakeOverride
-        else -> false
-    }
-
 fun IrClass.isSubclassOf(ancestor: IrClass): Boolean {
 
     val alreadyVisited = mutableSetOf<IrClass>()
@@ -260,75 +259,13 @@ fun IrClass.isSubclassOf(ancestor: IrClass): Boolean {
     return this.hasAncestorInSuperTypes()
 }
 
-fun IrSimpleFunction.collectRealOverrides(toSkip: (IrSimpleFunction) -> Boolean = { false }): Set<IrSimpleFunction> {
-    if (isReal && !toSkip(this)) return setOf(this)
-
-    val visited = mutableSetOf<IrSimpleFunction>()
-    val realOverrides = mutableSetOf<IrSimpleFunction>()
-
-    fun collectRealOverrides(func: IrSimpleFunction) {
-        if (!visited.add(func)) return
-
-        if (func.isReal && !toSkip(func)) {
-            realOverrides += func
-        } else {
-            func.overriddenSymbols.forEach { collectRealOverrides(it.owner) }
-        }
-    }
-
-    overriddenSymbols.forEach { collectRealOverrides(it.owner) }
-
-    fun excludeRepeated(func: IrSimpleFunction) {
-        if (!visited.add(func)) return
-
-        func.overriddenSymbols.forEach {
-            realOverrides.remove(it.owner)
-            excludeRepeated(it.owner)
-        }
-    }
-
-    visited.clear()
-    realOverrides.toList().forEach { excludeRepeated(it) }
-
-    return realOverrides
-}
-
-// This implementation is from kotlin-native
-// TODO: use this implementation instead of any other
-fun IrSimpleFunction.resolveFakeOverride(toSkip: (IrSimpleFunction) -> Boolean = { false }): IrSimpleFunction? {
-    return collectRealOverrides(toSkip)
-        .filter { it.modality != Modality.ABSTRACT }
-        .let { realOverrides ->
-            // Kotlin forbids conflicts between overrides, but they may trickle down from Java.
-            realOverrides.singleOrNull { it.parent.safeAs<IrClass>()?.isInterface != true } ?: realOverrides.singleOrNull()
-        }
-}
-
-fun IrSimpleFunction.isOrOverridesSynthesized(): Boolean {
-    if (isSynthesized) return true
-
-    if (isFakeOverride) return overriddenSymbols.all { it.owner.isOrOverridesSynthesized() }
-
-    return false
-}
-
 fun IrSimpleFunction.findInterfaceImplementation(): IrSimpleFunction? {
     if (isReal) return null
-
-    if (isOrOverridesSynthesized()) return null
 
     return resolveFakeOverride()?.run { if (parentAsClass.isInterface) this else null }
 }
 
-fun IrField.resolveFakeOverride(): IrField? {
-    var toVisit = setOf(this)
-    val nonOverridden = mutableSetOf<IrField>()
-    while (toVisit.isNotEmpty()) {
-        nonOverridden += toVisit.filter { it.overriddenSymbols.isEmpty() }
-        toVisit = toVisit.flatMap { it.overriddenSymbols }.map { it.owner }.toSet()
-    }
-    return nonOverridden.singleOrNull()
-}
+fun IrProperty.resolveFakeOverride(): IrProperty? = getter?.resolveFakeOverride()?.correspondingPropertySymbol?.owner
 
 val IrClass.isAnnotationClass get() = kind == ClassKind.ANNOTATION_CLASS
 val IrClass.isEnumClass get() = kind == ClassKind.ENUM_CLASS
@@ -345,7 +282,8 @@ val IrDeclarationWithName.fqNameWhenAvailable: FqName?
     }
 
 val IrDeclaration.parentAsClass: IrClass
-    get() = parent as? IrClass ?: error("Parent of this declaration is not a class: ${render()}")
+    get() = parent as? IrClass
+        ?: error("Parent of this declaration is not a class: ${render()}")
 
 fun IrClass.isLocalClass(): Boolean {
     var current: IrDeclarationParent? = this
@@ -367,11 +305,13 @@ tailrec fun IrElement.getPackageFragment(): IrPackageFragment? {
     }
 }
 
+@OptIn(ObsoleteDescriptorBasedAPI::class)
 fun IrAnnotationContainer.getAnnotation(name: FqName): IrConstructorCall? =
     annotations.find {
         it.symbol.owner.parentAsClass.descriptor.fqNameSafe == name
     }
 
+@OptIn(ObsoleteDescriptorBasedAPI::class)
 fun IrAnnotationContainer.hasAnnotation(name: FqName) =
     annotations.any {
         it.symbol.owner.parentAsClass.descriptor.fqNameSafe == name
@@ -386,11 +326,13 @@ fun IrAnnotationContainer.hasAnnotation(symbol: IrClassSymbol) =
 val IrConstructor.constructedClassType get() = (parent as IrClass).thisReceiver?.type!!
 
 fun IrFunction.isFakeOverriddenFromAny(): Boolean {
-    if (origin != IrDeclarationOrigin.FAKE_OVERRIDE) {
+    val simpleFunction = this as? IrSimpleFunction ?: return false
+
+    if (!simpleFunction.isFakeOverride) {
         return (parent as? IrClass)?.thisReceiver?.type?.isAny() ?: false
     }
 
-    return (this as IrSimpleFunction).overriddenSymbols.all { it.owner.isFakeOverriddenFromAny() }
+    return simpleFunction.overriddenSymbols.all { it.owner.isFakeOverriddenFromAny() }
 }
 
 fun IrCall.isSuperToAny() = superQualifierSymbol?.let { this.symbol.owner.isFakeOverriddenFromAny() } ?: false
@@ -437,6 +379,7 @@ fun IrValueParameter.hasDefaultValue(): Boolean = DFS.ifAny(
     { current -> current.defaultValue != null }
 )
 
+@ObsoleteDescriptorBasedAPI
 fun IrValueParameter.copy(newDescriptor: ParameterDescriptor): IrValueParameter {
     assert(this.descriptor.type == newDescriptor.type)
 
@@ -544,8 +487,9 @@ fun irCall(
             type,
             newSymbol,
             typeArgumentsCount,
-            origin,
-            newSuperQualifierSymbol
+            valueArgumentsCount = newSymbol.owner.valueParameters.size,
+            origin = origin,
+            superQualifierSymbol = newSuperQualifierSymbol
         ).apply {
             copyTypeAndValueArgumentsFrom(
                 call,
@@ -678,3 +622,6 @@ fun SymbolTable.findOrDeclareExternalPackageFragment(descriptor: PackageFragment
 
 val IrDeclaration.isFileClass: Boolean
     get() = origin == IrDeclarationOrigin.FILE_CLASS || origin == IrDeclarationOrigin.SYNTHETIC_FILE_CLASS
+
+val IrValueDeclaration.isImmutable: Boolean
+    get() = this is IrValueParameter || this is IrVariable && !isVar

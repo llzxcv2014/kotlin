@@ -5,6 +5,7 @@
 
 package org.jetbrains.kotlin.fir.resolve.calls
 
+import org.jetbrains.kotlin.fir.declarations.FirTypeParameterRefsOwner
 import org.jetbrains.kotlin.fir.declarations.FirTypeParametersOwner
 import org.jetbrains.kotlin.fir.types.FirTypeProjection
 import org.jetbrains.kotlin.fir.types.impl.FirTypePlaceholderProjection
@@ -33,9 +34,9 @@ internal object MapTypeArguments : ResolutionStage() {
             return
         }
 
-        val owner = candidate.symbol.fir as FirTypeParametersOwner
+        val owner = candidate.symbol.fir as FirTypeParameterRefsOwner
 
-        if (typeArguments.size == owner.typeParameters.size) {
+        if (typeArguments.size == owner.typeParameters.size || callInfo.callKind == CallKind.DelegatingConstructorCall) {
             candidate.typeArgumentMapping = TypeArgumentMapping.Mapped(typeArguments)
         } else {
             sink.yieldApplicability(CandidateApplicability.INAPPLICABLE)

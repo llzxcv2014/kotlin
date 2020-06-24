@@ -12,6 +12,7 @@ import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.descriptors.ReceiverParameterDescriptor
 import org.jetbrains.kotlin.descriptors.Visibilities
 import org.jetbrains.kotlin.descriptors.Visibility
+import org.jetbrains.kotlin.ir.ObsoleteDescriptorBasedAPI
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
@@ -40,7 +41,6 @@ import org.jetbrains.kotlin.ir.types.impl.IrTypeAbbreviationImpl
 import org.jetbrains.kotlin.ir.types.impl.IrUninitializedType
 import org.jetbrains.kotlin.ir.types.impl.makeTypeProjection
 import org.jetbrains.kotlin.ir.util.constructedClass
-import org.jetbrains.kotlin.ir.util.dump
 import org.jetbrains.kotlin.ir.util.file
 import org.jetbrains.kotlin.ir.util.parentAsClass
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
@@ -113,21 +113,28 @@ class LocalDeclarationsLowering(
         IrStatementOriginImpl("INITIALIZER_OF_FIELD_FOR_CAPTURED_VALUE")
 
     override fun lower(irBody: IrBody, container: IrDeclaration) {
-        LocalDeclarationsTransformer(irBody, container).lowerLocalDeclarations()
+        LocalDeclarationsTransformer(irBody, container, null).lowerLocalDeclarations()
     }
 
-    private class ScopeWithCounter(scope: Scope, irElement: IrElement) : ScopeWithIr(scope, irElement) {
+    fun lower(irElement: IrElement, container: IrDeclaration, classesToLower: Set<IrClass>) {
+        LocalDeclarationsTransformer(irElement, container, classesToLower).lowerLocalDeclarations()
+    }
+
+    internal class ScopeWithCounter(scope: Scope, irElement: IrElement) : ScopeWithIr(scope, irElement) {
         // Continuous numbering across all declarations in the container.
         var counter: Int = 0
+        val usedLocalFunctionNames: MutableSet<Name> = hashSetOf()
     }
 
-    private val scopeMap: MutableMap<IrSymbolOwner, ScopeWithCounter> = mutableMapOf()
+    internal class LocalScopeWithCounterMap {
+        val scopeMap: MutableMap<IrSymbolOwner, ScopeWithCounter> = hashMapOf()
+    }
+
     // Need to keep LocalFunctionContext.index
     private val IrSymbolOwner.scopeWithCounter: ScopeWithCounter
-        get() = scopeMap.getOrPut(this) {
+        get() = context.ir.localScopeWithCounterMap.scopeMap.getOrPut(this) {
             ScopeWithCounter(Scope(symbol), this)
         }
-
 
     private abstract class LocalContext {
         val capturedTypeParameterToTypeParameter: MutableMap<IrTypeParameter, IrTypeParameter> = mutableMapOf()
@@ -222,11 +229,13 @@ class LocalDeclarationsLowering(
             abbreviation.annotations
         )
 
-    private inner class LocalDeclarationsTransformer(val irBody: IrBody, val container: IrDeclaration) {
+    @OptIn(ObsoleteDescriptorBasedAPI::class)
+    private inner class LocalDeclarationsTransformer(
+        val irElement: IrElement, val container: IrDeclaration, val classesToLower: Set<IrClass>?
+    ) {
         val localFunctions: MutableMap<IrFunction, LocalFunctionContext> = LinkedHashMap()
         val localClasses: MutableMap<IrClass, LocalClassContext> = LinkedHashMap()
         val localClassConstructors: MutableMap<IrConstructor, LocalClassConstructorContext> = LinkedHashMap()
-        val usedLocalFunctionNames: MutableSet<Name> = mutableSetOf()
 
         val transformedDeclarations = mutableMapOf<IrSymbolOwner, IrDeclaration>()
 
@@ -350,7 +359,8 @@ class LocalDeclarationsLowering(
                     expression.startOffset, expression.endOffset,
                     context.irBuiltIns.unitType,
                     newCallee.symbol,
-                    expression.typeArgumentsCount
+                    typeArgumentsCount = expression.typeArgumentsCount,
+                    valueArgumentsCount = newCallee.valueParameters.size
                 ).also {
                     it.fillArguments2(expression, newCallee)
                     it.copyTypeArgumentsFrom(expression)
@@ -408,9 +418,10 @@ class LocalDeclarationsLowering(
                     expression.startOffset, expression.endOffset,
                     expression.type, // TODO functional type for transformed descriptor
                     newCallee.symbol,
-                    newCallee.typeParameters.size,
-                    newReflectionTarget?.symbol,
-                    expression.origin
+                    typeArgumentsCount = newCallee.typeParameters.size,
+                    valueArgumentsCount = newCallee.valueParameters.size,
+                    reflectionTarget = newReflectionTarget?.symbol,
+                    origin = expression.origin
                 ).also {
                     it.fillArguments2(expression, newCallee)
                     it.setLocalTypeArguments(oldCallee)
@@ -503,7 +514,7 @@ class LocalDeclarationsLowering(
                 rewriteClassMembers(it.declaration, it)
             }
 
-            rewriteFunctionBody(container, null)
+            rewriteFunctionBody(irElement, null)
         }
 
         private fun createNewCall(oldCall: IrCall, newCallee: IrFunction) =
@@ -511,9 +522,10 @@ class LocalDeclarationsLowering(
                 oldCall.startOffset, oldCall.endOffset,
                 newCallee.returnType,
                 newCallee.symbol,
-                newCallee.typeParameters.size,
-                oldCall.origin,
-                oldCall.superQualifierSymbol
+                typeArgumentsCount = newCallee.typeParameters.size,
+                valueArgumentsCount = newCallee.valueParameters.size,
+                origin = oldCall.origin,
+                superQualifierSymbol = oldCall.superQualifierSymbol
             ).also {
                 it.setLocalTypeArguments(oldCall.symbol.owner)
                 it.copyTypeArgumentsFrom(oldCall, shift = newCallee.typeParameters.size - oldCall.typeArgumentsCount)
@@ -763,8 +775,7 @@ class LocalDeclarationsLowering(
                 visibility,
                 isFinal = true,
                 isExternal = false,
-                isStatic = false,
-                isFakeOverride = false
+                isStatic = false
             ).also {
                 descriptor.bind(it)
                 it.parent = parent
@@ -817,7 +828,7 @@ class LocalDeclarationsLowering(
 
         private fun collectClosureForLocalDeclarations() {
             //TODO: maybe use for granular declarations
-            val annotator = ClosureAnnotator(irBody, container)
+            val annotator = ClosureAnnotator(irElement, container)
 
             localFunctions.forEach { (declaration, context) ->
                 context.closure = annotator.getFunctionClosure(declaration)
@@ -829,19 +840,17 @@ class LocalDeclarationsLowering(
         }
 
         private fun collectLocalDeclarations() {
-            val enclosingFileScope = container.file.scopeWithCounter
-
-            val enclosingClassScope = run {
+            val enclosingFile = container.file
+            val enclosingClass = run {
                 var currentParent = container as? IrClass ?: container.parent
                 while (currentParent is IrDeclaration && currentParent !is IrClass) {
                     currentParent = currentParent.parent
                 }
 
                 currentParent as? IrClass
-            }?.scopeWithCounter
+            }
 
-            irBody.acceptVoid(object : IrElementVisitorVoidWithContext() {
-
+            irElement.acceptVoid(object : IrElementVisitorVoidWithContext() {
                 override fun visitElement(element: IrElement) {
                     element.acceptChildrenVoid(this)
                 }
@@ -850,22 +859,29 @@ class LocalDeclarationsLowering(
                     return ScopeWithCounter(Scope(declaration.symbol), declaration) // Don't cache local declarations
                 }
 
+                override fun visitFunctionExpression(expression: IrFunctionExpression) {
+                    // TODO: For now IrFunctionExpression can only be encountered here if this was called from the inliner,
+                    // then all IrFunctionExpression will be replaced by IrFunctionReferenceExpression.
+                    // Don't forget to fix this when that replacement has been dropped.
+                    // Also, a note: even if a lambda is not an inline one, there still cannot be a reference to it
+                    // from an outside declaration, so it is safe to skip them here and correctly handle later, after the above conversion.
+                    expression.function.acceptChildrenVoid(this)
+                }
+
                 override fun visitSimpleFunction(declaration: IrSimpleFunction) {
                     super.visitSimpleFunction(declaration)
 
                     if (declaration.visibility == Visibilities.LOCAL) {
-                        val scopeWithIr =
-                            (currentClass ?: enclosingClassScope ?: enclosingFileScope /*file is required for K/N cause file declarations are not split by classes*/
-                            ?: error("No scope for ${declaration.dump()}"))
+                        val enclosingScope =
+                            // File is required for K/N because file declarations are not split by classes.
+                            currentClass ?: enclosingClass?.scopeWithCounter ?: enclosingFile.scopeWithCounter
+                        val index =
+                            if (enclosingScope is ScopeWithCounter &&
+                                (declaration.name.isSpecial || declaration.name in enclosingScope.usedLocalFunctionNames)
+                            ) enclosingScope.counter++ else -1
                         localFunctions[declaration] =
-                            LocalFunctionContext(
-                                declaration,
-                                if (declaration.name.isSpecial || declaration.name in usedLocalFunctionNames)
-                                    (scopeWithIr as ScopeWithCounter).counter++
-                                else -1,
-                                scopeWithIr.irElement as IrDeclarationContainer
-                            )
-                        usedLocalFunctionNames.add(declaration.name)
+                            LocalFunctionContext(declaration, index, enclosingScope.irElement as IrDeclarationContainer)
+                        (enclosingScope as? ScopeWithCounter)?.usedLocalFunctionNames?.add(declaration.name)
                     }
                 }
 
@@ -878,6 +894,7 @@ class LocalDeclarationsLowering(
                 }
 
                 override fun visitClassNew(declaration: IrClass) {
+                    if (classesToLower?.contains(declaration) == false) return
                     super.visitClassNew(declaration)
 
                     if (!declaration.isLocalNotInner()) return

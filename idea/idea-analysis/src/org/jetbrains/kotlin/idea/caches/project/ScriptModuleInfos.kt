@@ -22,14 +22,17 @@ import org.jetbrains.kotlin.resolve.jvm.platform.JvmPlatformAnalyzerServices
 import org.jetbrains.kotlin.scripting.definitions.ScriptDefinition
 
 data class ScriptModuleInfo(
-    val project: Project,
+    override val project: Project,
     val scriptFile: VirtualFile,
     val scriptDefinition: ScriptDefinition
 ) : IdeaModuleInfo {
     override val moduleOrigin: ModuleOrigin
         get() = ModuleOrigin.OTHER
 
-    override val name: Name = Name.special(KotlinIdeaAnalysisBundle.message("script.0.1", scriptFile.name, scriptDefinition.name))
+    override val name: Name = Name.special("<script ${scriptFile.name} ${scriptDefinition.name}>")
+
+    override val displayedName: String
+        get() = KotlinIdeaAnalysisBundle.message("script.0.1", scriptFile.presentableName, scriptDefinition.name)
 
     override fun contentScope() = GlobalSearchScope.fileScope(project, scriptFile)
 
@@ -53,16 +56,19 @@ data class ScriptModuleInfo(
     }
 
     override val platform: TargetPlatform
-        get() = TargetPlatformDetector.getPlatform(project, scriptDefinition)
+        get() = TargetPlatformDetector.getPlatform4Script(project, scriptFile, scriptDefinition)
 
     override val analyzerServices: PlatformDependentAnalyzerServices
         get() = JvmPlatformAnalyzerServices
 }
 
-sealed class ScriptDependenciesInfo(val project: Project) : IdeaModuleInfo, BinaryModuleInfo {
+sealed class ScriptDependenciesInfo(override val project: Project) : IdeaModuleInfo, BinaryModuleInfo {
     abstract val sdk: Sdk?
 
-    override val name = Name.special(KotlinIdeaAnalysisBundle.message("script.dependencies"))
+    override val name = Name.special("<Script dependencies>")
+
+    override val displayedName: String
+        get() = KotlinIdeaAnalysisBundle.message("script.dependencies")
 
     override fun dependencies(): List<IdeaModuleInfo> = listOfNotNull(this, sdk?.let { SdkInfo(project, it) })
 
@@ -107,7 +113,6 @@ sealed class ScriptDependenciesInfo(val project: Project) : IdeaModuleInfo, Bina
         override val sdk: Sdk?
             get() {
                 return ScriptConfigurationManager.getInstance(project).getFirstScriptsSdk()
-                    ?: ScriptConfigurationManager.getScriptDefaultSdk(project)
             }
 
         override fun contentScope(): GlobalSearchScope {
@@ -118,8 +123,11 @@ sealed class ScriptDependenciesInfo(val project: Project) : IdeaModuleInfo, Bina
     }
 }
 
-sealed class ScriptDependenciesSourceInfo(val project: Project) : IdeaModuleInfo, SourceForBinaryModuleInfo {
-    override val name = Name.special(KotlinIdeaAnalysisBundle.message("source.for.script.dependencies"))
+sealed class ScriptDependenciesSourceInfo(override val project: Project) : IdeaModuleInfo, SourceForBinaryModuleInfo {
+    override val name = Name.special("<Source for script dependencies>")
+
+    override val displayedName: String
+        get() = KotlinIdeaAnalysisBundle.message("source.for.script.dependencies")
 
     override val binariesModuleInfo: ScriptDependenciesInfo
         get() = ScriptDependenciesInfo.ForProject(project)

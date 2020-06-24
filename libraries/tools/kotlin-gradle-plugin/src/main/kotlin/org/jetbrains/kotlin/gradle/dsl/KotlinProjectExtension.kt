@@ -1,17 +1,6 @@
 /*
- * Copyright 2010-2017 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright 2010-2020 JetBrains s.r.o. and Kotlin Programming Language contributors.
+ * Use of this source code is governed by the Apache 2.0 license that can be found in the license/LICENSE.txt file.
  */
 
 package org.jetbrains.kotlin.gradle.dsl
@@ -22,15 +11,16 @@ import org.gradle.api.Project
 import org.gradle.api.internal.plugins.DslObject
 import org.gradle.util.ConfigureUtil
 import org.jetbrains.kotlin.gradle.plugin.*
-import org.jetbrains.kotlin.gradle.plugin.KotlinJsCompilerType.*
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinAndroidTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinJsSingleTargetPreset
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinWithJavaTarget
+import org.jetbrains.kotlin.gradle.plugin.statistics.KotlinBuildStatsService
 import org.jetbrains.kotlin.gradle.targets.js.calculateJsCompilerType
 import org.jetbrains.kotlin.gradle.targets.js.dsl.KotlinJsTargetDsl
 import org.jetbrains.kotlin.gradle.targets.js.ir.KotlinJsIrSingleTargetPreset
 import org.jetbrains.kotlin.gradle.utils.lowerCamelCaseName
 import org.jetbrains.kotlin.konan.target.CompilerOutputKind
+import org.jetbrains.kotlin.statistics.metrics.StringMetrics
 import kotlin.reflect.KClass
 
 private const val KOTLIN_PROJECT_EXTENSION_NAME = "kotlin"
@@ -56,6 +46,16 @@ internal val Project.multiplatformExtension: KotlinMultiplatformExtension
 open class KotlinProjectExtension : KotlinSourceSetContainer {
     val experimental: ExperimentalExtension
         get() = DslObject(this).extensions.getByType(ExperimentalExtension::class.java)
+
+    var explicitApi: ExplicitApiMode? = null
+
+    fun explicitApi() {
+        explicitApi = ExplicitApiMode.Strict
+    }
+
+    fun explicitApiWarning() {
+        explicitApi = ExplicitApiMode.Warning
+    }
 
     override var sourceSets: NamedDomainObjectContainer<KotlinSourceSet>
         @Suppress("UNCHECKED_CAST")
@@ -98,9 +98,19 @@ open class KotlinJsProjectExtension :
 
     // target is public property
     // Users can write kotlin.target and it should work
-    // So call of target should init default canfiguration
+    // So call of target should init default configuration
     internal var _target: KotlinJsTargetDsl? = null
         private set
+
+    companion object {
+        internal fun reportJsCompilerMode(compilerType: KotlinJsCompilerType) {
+            when (compilerType) {
+                KotlinJsCompilerType.LEGACY -> KotlinBuildStatsService.getInstance()?.report(StringMetrics.JS_COMPILER_MODE, "legacy")
+                KotlinJsCompilerType.IR -> KotlinBuildStatsService.getInstance()?.report(StringMetrics.JS_COMPILER_MODE, "ir")
+                KotlinJsCompilerType.BOTH -> KotlinBuildStatsService.getInstance()?.report(StringMetrics.JS_COMPILER_MODE, "both")
+            }
+        }
+    }
 
     @Deprecated("Use js() instead", ReplaceWith("js()"))
     override var target: KotlinJsTargetDsl
@@ -128,17 +138,26 @@ open class KotlinJsProjectExtension :
         }
 
         if (_target == null) {
-            val target: KotlinJsTargetDsl = when (compiler ?: defaultJsCompilerType) {
-                LEGACY -> legacyPreset
-                    .also { it.irPreset = null }
+            val compilerOrDefault = compiler ?: defaultJsCompilerType
+            reportJsCompilerMode(compilerOrDefault)
+            val target: KotlinJsTargetDsl = when (compilerOrDefault) {
+                KotlinJsCompilerType.LEGACY -> legacyPreset
+                    .also {
+                        it.irPreset = null
+                        KotlinBuildStatsService.getInstance()?.report(StringMetrics.JS_COMPILER_MODE, "legacy")
+                    }
                     .createTarget("js")
-                IR -> irPreset
-                    .also { it.mixedMode = false }
+                KotlinJsCompilerType.IR -> irPreset
+                    .also {
+                        it.mixedMode = false
+                        KotlinBuildStatsService.getInstance()?.report(StringMetrics.JS_COMPILER_MODE, "ir")
+                    }
                     .createTarget("js")
-                BOTH -> legacyPreset
+                KotlinJsCompilerType.BOTH -> legacyPreset
                     .also {
                         irPreset.mixedMode = true
                         it.irPreset = irPreset
+                        KotlinBuildStatsService.getInstance()?.report(StringMetrics.JS_COMPILER_MODE, "both")
                     }
                     .createTarget(
                         lowerCamelCaseName(
@@ -164,12 +183,25 @@ open class KotlinJsProjectExtension :
     ): KotlinJsTargetDsl = jsInternal(compiler, body)
 
     fun js(
+        compiler: String,
+        body: KotlinJsTargetDsl.() -> Unit = { }
+    ): KotlinJsTargetDsl = js(
+        KotlinJsCompilerType.byArgument(compiler),
+        body
+    )
+
+    fun js(
         body: KotlinJsTargetDsl.() -> Unit = { }
     ) = jsInternal(body = body)
 
     fun js() = js { }
 
     fun js(compiler: KotlinJsCompilerType, configure: Closure<*>) =
+        js(compiler = compiler) {
+            ConfigureUtil.configure(configure, this)
+        }
+
+    fun js(compiler: String, configure: Closure<*>) =
         js(compiler = compiler) {
             ConfigureUtil.configure(configure, this)
         }
@@ -185,8 +217,11 @@ open class KotlinJsProjectExtension :
         "Needed for IDE import using the MPP import mechanism",
         level = DeprecationLevel.HIDDEN
     )
-    fun getTargets() =
-        target.project.container(KotlinTarget::class.java).apply { add(target) }
+    fun getTargets(): NamedDomainObjectContainer<KotlinTarget>? =
+        _target?.let { target ->
+            target.project.container(KotlinTarget::class.java)
+                .apply { add(target) }
+        }
 }
 
 open class KotlinCommonProjectExtension : KotlinSingleJavaTargetExtension() {
@@ -228,4 +263,12 @@ enum class NativeCacheKind(val produce: String?, val outputKind: CompilerOutputK
         fun byCompilerArgument(argument: String): NativeCacheKind? =
             NativeCacheKind.values().firstOrNull { it.name.equals(argument, ignoreCase = true) }
     }
+}
+
+enum class ExplicitApiMode(private val cliOption: String) {
+    Strict("strict"),
+    Warning("warning"),
+    Disabled("disabled");
+
+    fun toCompilerArg() = "-Xexplicit-api=$cliOption"
 }

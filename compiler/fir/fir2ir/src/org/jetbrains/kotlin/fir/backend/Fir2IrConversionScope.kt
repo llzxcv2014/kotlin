@@ -8,6 +8,7 @@ package org.jetbrains.kotlin.fir.backend
 import org.jetbrains.kotlin.fir.declarations.FirSimpleFunction
 import org.jetbrains.kotlin.fir.expressions.FirReturnExpression
 import org.jetbrains.kotlin.ir.declarations.*
+import org.jetbrains.kotlin.ir.util.parentClassOrNull
 
 class Fir2IrConversionScope {
     private val parentStack = mutableListOf<IrDeclarationParent>()
@@ -21,6 +22,16 @@ class Fir2IrConversionScope {
     }
 
     fun parentFromStack(): IrDeclarationParent = parentStack.last()
+
+    fun parentAccessorOfPropertyFromStack(property: IrProperty): IrSimpleFunction? {
+        for (parent in parentStack.asReversed()) {
+            when (parent) {
+                property.getter -> return property.getter
+                property.setter -> return property.setter
+            }
+        }
+        return null
+    }
 
     fun <T : IrDeclaration> applyParentFromStackTo(declaration: T): T {
         declaration.parent = parentStack.last()
@@ -54,12 +65,20 @@ class Fir2IrConversionScope {
         return klass
     }
 
-    private val subjectVariableStack = mutableListOf<IrVariable>()
+    private val whenSubjectVariableStack = mutableListOf<IrVariable>()
+    private val safeCallSubjectVariableStack = mutableListOf<IrVariable>()
 
-    fun <T> withSubject(subject: IrVariable?, f: () -> T): T {
-        if (subject != null) subjectVariableStack += subject
+    fun <T> withWhenSubject(subject: IrVariable?, f: () -> T): T {
+        if (subject != null) whenSubjectVariableStack += subject
         val result = f()
-        if (subject != null) subjectVariableStack.removeAt(subjectVariableStack.size - 1)
+        if (subject != null) whenSubjectVariableStack.removeAt(whenSubjectVariableStack.size - 1)
+        return result
+    }
+
+    fun <T> withSafeCallSubject(subject: IrVariable?, f: () -> T): T {
+        if (subject != null) safeCallSubjectVariableStack += subject
+        val result = f()
+        if (subject != null) safeCallSubjectVariableStack.removeAt(safeCallSubjectVariableStack.size - 1)
         return result
     }
 
@@ -76,19 +95,17 @@ class Fir2IrConversionScope {
 
     fun parent(): IrDeclarationParent? = parentStack.lastOrNull()
 
-    fun lastDispatchReceiverParameter(): IrValueParameter? {
-        val dispatchReceiver = functionStack.lastOrNull()?.dispatchReceiverParameter
-        return if (dispatchReceiver != null) {
-            // Use the dispatch receiver of the containing function
-            dispatchReceiver
-        } else {
-            val lastClassSymbol = classStack.lastOrNull()?.symbol
-            // Use the dispatch receiver of the containing class
-            lastClassSymbol?.owner?.thisReceiver
+    fun dispatchReceiverParameter(irClass: IrClass): IrValueParameter? {
+        for (function in functionStack.asReversed()) {
+            if (function.parentClassOrNull == irClass) {
+                function.dispatchReceiverParameter?.let { return it }
+            }
         }
+        return irClass.thisReceiver
     }
 
     fun lastClass(): IrClass? = classStack.lastOrNull()
 
-    fun lastSubject(): IrVariable = subjectVariableStack.last()
+    fun lastWhenSubject(): IrVariable = whenSubjectVariableStack.last()
+    fun lastSafeCallSubject(): IrVariable = safeCallSubjectVariableStack.last()
 }

@@ -1,59 +1,106 @@
 package org.jetbrains.kotlin.tools.projectWizard.wizard.ui.firstStep
 
-import org.jetbrains.kotlin.tools.projectWizard.core.entity.DropDownSettingType
-import org.jetbrains.kotlin.tools.projectWizard.core.entity.reference
+import com.intellij.ui.ScrollPaneFactory
+import com.intellij.ui.SeparatorWithText
+import com.intellij.util.ui.JBUI
+import org.jetbrains.kotlin.idea.KotlinIcons
+import org.jetbrains.kotlin.tools.projectWizard.core.Context
+import org.jetbrains.kotlin.tools.projectWizard.core.entity.settings.DropDownSettingType
+import org.jetbrains.kotlin.tools.projectWizard.core.entity.settings.SettingReference
+import org.jetbrains.kotlin.tools.projectWizard.core.entity.settings.reference
 import org.jetbrains.kotlin.tools.projectWizard.plugins.projectTemplates.ProjectTemplatesPlugin
-import org.jetbrains.kotlin.tools.projectWizard.projectTemplates.ProjectTemplate
-import org.jetbrains.kotlin.tools.projectWizard.wizard.IdeContext
+import org.jetbrains.kotlin.tools.projectWizard.plugins.projectTemplates.applyProjectTemplate
+import org.jetbrains.kotlin.tools.projectWizard.projectTemplates.*
 import org.jetbrains.kotlin.tools.projectWizard.wizard.ui.*
 import org.jetbrains.kotlin.tools.projectWizard.wizard.ui.setting.SettingComponent
 import org.jetbrains.kotlin.tools.projectWizard.wizard.ui.setting.ValidationIndicator
-import java.awt.BorderLayout
-import javax.swing.BorderFactory
+import java.awt.Dimension
+import javax.swing.Icon
 import javax.swing.JComponent
 
 class ProjectTemplateSettingComponent(
-    ideContext: IdeContext,
-    private val onSelected: (ProjectTemplate) -> Unit
+    context: Context
 ) : SettingComponent<ProjectTemplate, DropDownSettingType<ProjectTemplate>>(
     ProjectTemplatesPlugin::template.reference,
-    ideContext
+    context
 ) {
     override val validationIndicator: ValidationIndicator? get() = null
+    override val forceLabelCenteringOffset: Int? = 4
+    private val templateDescriptionComponent = TemplateDescriptionComponent().asSubComponent()
 
-    private val list = ImmutableSingleSelectableListWithIcon(
-        setting.type.values,
-        renderValue = { value ->
-            icon = value.projectKind.icon
+    private val templateGroups = setting.type.values
+        .groupBy { it.projectKind }
+        .map { (group, templates) ->
+            ListWithSeparators.ListGroup(group.text, templates)
+        }
+
+    private val list = ListWithSeparators(
+        templateGroups,
+        render = { value ->
+            icon = value.icon
             append(value.title)
         },
-        onValueSelected = {
-            onValueSelected(it!!)
+        onValueSelected = { value = it }
+    )
+
+    private val scrollPane = ScrollPaneFactory.createScrollPane(list).apply {
+        preferredSize = Dimension(minimumSize.width, HEIGHT)
+    }
+
+    override val component: JComponent = borderPanel {
+        addToCenter(borderPanel { addToCenter(scrollPane) }.addBorder(JBUI.Borders.empty(0,/*left*/ 3, 0, /*right*/ 3)))
+        addToBottom(templateDescriptionComponent.component.addBorder(JBUI.Borders.empty(/*top*/8,/*left*/ 3, 0, 0)))
+    }
+
+    private fun applySelectedTemplate() = modify {
+        value?.let(::applyProjectTemplate)
+    }
+
+    override fun onValueUpdated(reference: SettingReference<*, *>?) {
+        super.onValueUpdated(reference)
+        if (reference == ProjectTemplatesPlugin::template.reference) {
+            applySelectedTemplate()
+            value?.let { template ->
+                list.setSelectedValue(template, true)
+                templateDescriptionComponent.setTemplate(template)
+            }
         }
-    ).apply {
-        border = BorderFactory.createEmptyBorder(
-            UiConstants.GAP_BORDER_SIZE,
-            UiConstants.GAP_BORDER_SIZE,
-            UiConstants.GAP_BORDER_SIZE,
-            UiConstants.GAP_BORDER_SIZE
-        )
-    }
-
-    private fun onValueSelected(selected: ProjectTemplate) {
-        value = selected
-        onSelected(selected)
-    }
-
-    override val component: JComponent = panel {
-        bordered(needTopEmptyBorder = false, needInnerEmptyBorder = false)
-        add(list, BorderLayout.CENTER)
     }
 
     override fun onInit() {
         super.onInit()
         if (setting.type.values.isNotEmpty()) {
             list.selectedIndex = 0
-            onValueSelected(setting.type.values.first())
+            value = setting.type.values.firstOrNull()
         }
     }
+
+    companion object {
+        private const val HEIGHT = 310
+    }
+}
+
+private val ProjectTemplate.icon: Icon
+    get() = when (this) {
+        BackendApplicationProjectTemplate -> KotlinIcons.Wizard.JVM
+        MultiplatformApplicationProjectTemplate -> KotlinIcons.Wizard.MULTIPLATFORM
+        ConsoleApplicationProjectTemplate -> KotlinIcons.Wizard.CONSOLE
+        MultiplatformLibraryProjectTemplate -> KotlinIcons.Wizard.MULTIPLATFORM_LIBRARY
+        FullStackWebApplicationProjectTemplate -> KotlinIcons.Wizard.WEB
+        NativeApplicationProjectTemplate -> KotlinIcons.Wizard.NATIVE
+        FrontendApplicationProjectTemplate -> KotlinIcons.Wizard.JS
+        MultiplatformMobileApplicationProjectTemplate -> KotlinIcons.Wizard.MULTIPLATFORM_MOBILE
+        MultiplatformMobileLibraryProjectTemplate -> KotlinIcons.Wizard.MULTIPLATFORM_MOBILE_LIBRARY
+    }
+
+class TemplateDescriptionComponent : Component() {
+    private val descriptionLabel = CommentLabel().apply {
+        preferredSize = Dimension(preferredSize.width, 45)
+    }
+
+    fun setTemplate(template: ProjectTemplate) {
+        descriptionLabel.text = template.description.asHtml()
+    }
+
+    override val component: JComponent = descriptionLabel
 }

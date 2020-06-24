@@ -27,25 +27,24 @@ import org.jetbrains.kotlin.codegen.TypeAnnotationCollector
 import org.jetbrains.kotlin.codegen.TypePathInfo
 import org.jetbrains.kotlin.config.JVMConfigurationKeys
 import org.jetbrains.kotlin.config.JvmTarget.JVM_1_6
+import org.jetbrains.kotlin.descriptors.ClassKind
 import org.jetbrains.kotlin.descriptors.Visibilities
 import org.jetbrains.kotlin.descriptors.annotations.KotlinRetention
 import org.jetbrains.kotlin.descriptors.annotations.KotlinTarget
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.*
 import org.jetbrains.kotlin.ir.types.*
-import org.jetbrains.kotlin.ir.types.impl.originalKotlinType
 import org.jetbrains.kotlin.ir.util.*
-import org.jetbrains.kotlin.load.kotlin.FileBasedKotlinClass
-import org.jetbrains.kotlin.load.kotlin.KotlinJvmBinarySourceElement
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.resolve.checkers.ExpectedActualDeclarationChecker
-import org.jetbrains.kotlin.serialization.deserialization.descriptors.DeserializedClassDescriptor
 import org.jetbrains.kotlin.synthetic.isVisibleOutside
 import org.jetbrains.kotlin.types.TypeSystemCommonBackendContext
 import org.jetbrains.kotlin.types.isNullabilityFlexible
 import org.jetbrains.kotlin.types.model.KotlinTypeMarker
-import org.jetbrains.org.objectweb.asm.*
+import org.jetbrains.org.objectweb.asm.AnnotationVisitor
+import org.jetbrains.org.objectweb.asm.Type
+import org.jetbrains.org.objectweb.asm.TypePath
 import java.lang.annotation.RetentionPolicy
 
 abstract class AnnotationCodegen(
@@ -139,8 +138,14 @@ abstract class AnnotationCodegen(
 
         val type = when (declaration) {
             is IrFunction -> declaration.returnType
-            is IrField -> declaration.type
             is IrValueDeclaration -> declaration.type
+            is IrField ->
+                if (declaration.correspondingPropertySymbol?.owner?.isLateinit == true) {
+                    // Lateinit fields are nullable, but should be marked as NotNull to match the JVM backend.
+                    declaration.type.makeNotNull()
+                } else {
+                    declaration.type
+                }
             else -> return
         }
 
@@ -183,7 +188,7 @@ abstract class AnnotationCodegen(
         // We do not generate annotations whose classes are optional (annotated with `@OptionalExpectation`) because if an annotation entry
         // is resolved to the expected declaration, this means that annotation has no actual class, and thus should not be generated.
         // (Otherwise we would've resolved the entry to the actual annotation class.)
-        if (ExpectedActualDeclarationChecker.isOptionalAnnotationClass(annotationClass.descriptor)) {
+        if (annotationClass.isOptionalAnnotationClass) {
             return null
         }
 
@@ -237,8 +242,10 @@ abstract class AnnotationCodegen(
                 val callee = value.symbol.owner
                 when {
                     callee.parentAsClass.isAnnotationClass -> {
-                        val internalAnnName = typeMapper.mapType(callee.returnType).descriptor
+                        val annotationClassType = callee.returnType
+                        val internalAnnName = typeMapper.mapType(annotationClassType).descriptor
                         val visitor = annotationVisitor.visitAnnotation(name, internalAnnName)
+                        annotationClassType.classOrNull?.owner?.let(innerClassConsumer::addInnerClassInfoFromAnnotation)
                         genAnnotationArguments(value, visitor)
                         visitor.visitEnd()
                     }
@@ -246,9 +253,10 @@ abstract class AnnotationCodegen(
                 }
             }
             is IrGetEnumValue -> {
-                val enumClassInternalName = typeMapper.mapClass(value.symbol.owner.parentAsClass).descriptor
-                val enumEntryName = value.symbol.owner.name
-                annotationVisitor.visitEnum(name, enumClassInternalName, enumEntryName.asString())
+                val enumEntry = value.symbol.owner
+                val enumClass = enumEntry.parentAsClass
+                innerClassConsumer.addInnerClassInfoFromAnnotation(enumClass)
+                annotationVisitor.visitEnum(name, typeMapper.mapClass(enumClass).descriptor, enumEntry.name.asString())
             }
             is IrVararg -> { // array constructor
                 val visitor = annotationVisitor.visitArray(name)
@@ -258,7 +266,9 @@ abstract class AnnotationCodegen(
                 visitor.visitEnd()
             }
             is IrClassReference -> {
-                annotationVisitor.visit(name, typeMapper.mapType(value.classType))
+                val classType = value.classType
+                classType.classOrNull?.owner?.let(innerClassConsumer::addInnerClassInfoFromAnnotation)
+                annotationVisitor.visit(name, typeMapper.mapType(classType))
             }
             is IrErrorExpression -> error("Don't know how to compile annotation value ${ir2string(value)}")
             else -> error("Unsupported compile-time value ${ir2string(value)}")
@@ -267,11 +277,14 @@ abstract class AnnotationCodegen(
 
     companion object {
         private fun isInvisibleFromTheOutside(declaration: IrDeclaration?): Boolean {
-            if (declaration is IrSimpleFunction && declaration.origin === JvmLoweredDeclarationOrigin.SYNTHETIC_ACCESSOR) {
+            if (declaration != null && declaration.origin.isSynthetic) {
                 return true
             }
             if (declaration is IrDeclarationWithVisibility) {
                 return !declaration.visibility.isVisibleOutside()
+            }
+            if (declaration is IrValueParameter && (declaration.parent as IrDeclaration).origin.isSynthetic) {
+                return true
             }
             return false
         }
@@ -331,13 +344,18 @@ abstract class AnnotationCodegen(
         override fun KotlinTypeMarker.extractAnnotations(): List<IrConstructorCall> {
             require(this is IrType)
             return annotations.filter {
-                //We only generate annotations which have the TYPE_USE Java target.
+                // We only generate annotations which have the TYPE_USE Java target.
                 // Those are type annotations which were compiled with JVM target bytecode version 1.8 or greater
                 (it.annotationClass.origin != IrDeclarationOrigin.IR_EXTERNAL_DECLARATION_STUB &&
                         it.annotationClass.origin != IrDeclarationOrigin.IR_EXTERNAL_JAVA_DECLARATION_STUB) ||
-                        isCompiledToJvm8OrHigher(it.annotationClass.descriptor)
+                        it.annotationClass.isCompiledToJvm8OrHigher
             }
         }
+
+        private val IrClass.isCompiledToJvm8OrHigher: Boolean
+            get() =
+                (origin == IrDeclarationOrigin.IR_EXTERNAL_DECLARATION_STUB || origin == IrDeclarationOrigin.IR_EXTERNAL_JAVA_DECLARATION_STUB) &&
+                        isCompiledToJvm8OrHigher(source)
     }
 
 }
@@ -382,3 +400,9 @@ private fun loadAnnotationTargets(targetEntry: IrConstructorCall): Set<KotlinTar
         KotlinTarget.valueOrNull(it.symbol.owner.name.asString())
     }.toSet()
 }
+
+// From ExpectedActualDeclarationChecker
+private val IrClass.isOptionalAnnotationClass: Boolean
+    get() = kind == ClassKind.ANNOTATION_CLASS &&
+            isExpect &&
+            hasAnnotation(ExpectedActualDeclarationChecker.OPTIONAL_EXPECTATION_FQ_NAME)

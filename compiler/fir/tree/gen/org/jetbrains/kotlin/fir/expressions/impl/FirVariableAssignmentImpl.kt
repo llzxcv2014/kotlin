@@ -22,7 +22,6 @@ import org.jetbrains.kotlin.fir.visitors.*
 internal class FirVariableAssignmentImpl(
     override val source: FirSourceElement?,
     override val annotations: MutableList<FirAnnotationCall>,
-    override var safe: Boolean,
     override val typeArguments: MutableList<FirTypeProjection>,
     override var explicitReceiver: FirExpression?,
     override var dispatchReceiver: FirExpression,
@@ -51,7 +50,7 @@ internal class FirVariableAssignmentImpl(
     }
 
     override fun <D> transformChildren(transformer: FirTransformer<D>, data: D): FirVariableAssignmentImpl {
-        annotations.transformInplace(transformer, data)
+        transformAnnotations(transformer, data)
         transformTypeArguments(transformer, data)
         explicitReceiver = explicitReceiver?.transformSingle(transformer, data)
         if (dispatchReceiver !== explicitReceiver) {
@@ -62,6 +61,11 @@ internal class FirVariableAssignmentImpl(
         }
         transformCalleeReference(transformer, data)
         transformRValue(transformer, data)
+        return this
+    }
+
+    override fun <D> transformAnnotations(transformer: FirTransformer<D>, data: D): FirVariableAssignmentImpl {
+        annotations.transformInplace(transformer, data)
         return this
     }
 
@@ -98,5 +102,9 @@ internal class FirVariableAssignmentImpl(
     override fun replaceTypeArguments(newTypeArguments: List<FirTypeProjection>) {
         typeArguments.clear()
         typeArguments.addAll(newTypeArguments)
+    }
+
+    override fun replaceCalleeReference(newCalleeReference: FirReference) {
+        calleeReference = newCalleeReference
     }
 }

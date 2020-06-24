@@ -4,25 +4,9 @@ plugins {
     java
 }
 
-val projectsToShadow = listOf(
-    ":core:type-system",
-    ":kotlin-build-common",
-    ":kotlin-util-io",
-    ":kotlin-util-klib",
-    ":kotlin-util-klib-metadata",
-    ":compiler:cli-common",
-    ":kotlin-compiler-runner",
-    ":daemon-common",
-    ":daemon-common-new",
-    ":core:descriptors",
-    ":core:descriptors.jvm",
-    ":idea:idea-jps-common",
-    ":jps-plugin",
-    ":kotlin-preloader",
-    ":compiler:util",
-    ":core:util.runtime",
-    ":compiler:compiler.version"
-)
+val compilerComponents = rootProject.extra["compilerModulesForJps"] as List<String>
+
+val projectsToShadow = compilerComponents + listOf(":jps-plugin")
 
 dependencies {
     projectsToShadow.forEach {

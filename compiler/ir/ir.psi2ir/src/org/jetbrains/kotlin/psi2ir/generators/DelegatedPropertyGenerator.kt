@@ -86,6 +86,8 @@ class DelegatedPropertyGenerator(declarationGenerator: DeclarationGenerator) : D
             }
         }
 
+        irProperty.linkCorrespondingPropertySymbol()
+
         return irProperty
     }
 
@@ -131,7 +133,7 @@ class DelegatedPropertyGenerator(declarationGenerator: DeclarationGenerator) : D
             context.symbolTable.declareField(
                 startOffset, endOffset, origin, delegateDescriptor, type
             ) {
-                IrFieldImpl(startOffset, endOffset, origin, it, type).apply {
+                IrFieldImpl(startOffset, endOffset, origin, delegateDescriptor, type, symbol = it).apply {
                     metadata = MetadataSource.Property(propertyDescriptor)
                 }
             }.also { irDelegate ->
@@ -177,7 +179,7 @@ class DelegatedPropertyGenerator(declarationGenerator: DeclarationGenerator) : D
             BackingFieldLValue(
                 context,
                 ktDelegate.startOffsetSkippingComments, ktDelegate.endOffset,
-                irDelegateField.descriptor.type.toIrType(),
+                irDelegateField.owner.type,
                 irDelegateField,
                 thisValue,
                 null
@@ -346,7 +348,7 @@ class DelegatedPropertyGenerator(declarationGenerator: DeclarationGenerator) : D
             context,
             ktDelegate.startOffsetSkippingComments, ktDelegate.endOffset,
             irDelegate,
-            irDelegate.descriptor.type.toIrType()
+            irDelegate.owner.type
         )
 
     private inline fun createLocalPropertyAccessor(

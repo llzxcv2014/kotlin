@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 JetBrains s.r.o. and Kotlin Programming Language contributors.
+ * Copyright 2010-2020 JetBrains s.r.o. and Kotlin Programming Language contributors.
  * Use of this source code is governed by the Apache 2.0 license that can be found in the license/LICENSE.txt file.
  */
 
@@ -7,6 +7,7 @@ package org.jetbrains.kotlin.idea.intentions
 
 import com.intellij.codeInsight.intention.LowPriorityAction
 import com.intellij.openapi.editor.Editor
+import org.jetbrains.kotlin.builtins.isSuspendFunctionType
 import org.jetbrains.kotlin.descriptors.FunctionDescriptor
 import org.jetbrains.kotlin.descriptors.impl.AnonymousFunctionDescriptor
 import org.jetbrains.kotlin.idea.KotlinBundle
@@ -22,7 +23,10 @@ import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.collectDescendantsOfType
 import org.jetbrains.kotlin.psi.psiUtil.endOffset
 import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
+import org.jetbrains.kotlin.resolve.BindingContext
 import org.jetbrains.kotlin.resolve.bindingContextUtil.getTargetFunctionDescriptor
+import org.jetbrains.kotlin.resolve.calls.callUtil.getParameterForArgument
+import org.jetbrains.kotlin.resolve.calls.callUtil.getResolvedCall
 import org.jetbrains.kotlin.resolve.lazy.BodyResolveMode
 import org.jetbrains.kotlin.types.isFlexible
 import org.jetbrains.kotlin.types.typeUtil.isTypeParameter
@@ -31,14 +35,20 @@ import org.jetbrains.kotlin.types.typeUtil.makeNotNullable
 
 class LambdaToAnonymousFunctionIntention : SelfTargetingIntention<KtLambdaExpression>(
     KtLambdaExpression::class.java,
-    KotlinBundle.message("convert.to.anonymous.function"),
-    KotlinBundle.message("convert.lambda.expression.to.anonymous.function")
+    KotlinBundle.lazyMessage("convert.to.anonymous.function"),
+    KotlinBundle.lazyMessage("convert.lambda.expression.to.anonymous.function")
 ), LowPriorityAction {
     override fun isApplicableTo(element: KtLambdaExpression, caretOffset: Int): Boolean {
-        if (element.getStrictParentOfType<KtValueArgument>() == null) return false
-        if (element.getStrictParentOfType<KtFunction>()?.hasModifier(KtTokens.INLINE_KEYWORD) == true) return false
-        val descriptor = element.functionLiteral.descriptor as? AnonymousFunctionDescriptor ?: return false
+        val argument = element.getStrictParentOfType<KtValueArgument>() ?: return false
+        val call = argument.getStrictParentOfType<KtCallElement>() ?: return false
+        if (call.getStrictParentOfType<KtFunction>()?.hasModifier(KtTokens.INLINE_KEYWORD) == true) return false
+
+        val context = call.analyze(BodyResolveMode.PARTIAL)
+        if (call.getResolvedCall(context)?.getParameterForArgument(argument)?.type?.isSuspendFunctionType == true) return false
+        val descriptor =
+            context[BindingContext.DECLARATION_TO_DESCRIPTOR, element.functionLiteral] as? AnonymousFunctionDescriptor ?: return false
         if (descriptor.valueParameters.any { it.name.isSpecial }) return false
+
         val lastElement = element.functionLiteral.arrow ?: element.functionLiteral.lBrace
         return caretOffset <= lastElement.endOffset
     }
@@ -75,6 +85,7 @@ class LambdaToAnonymousFunctionIntention : SelfTargetingIntention<KtLambdaExpres
                     functionDescriptor.extensionReceiverParameter?.type?.let {
                         receiver(typeSourceCode.renderType(it))
                     }
+
                     name(functionName)
                     for (parameter in functionDescriptor.valueParameters) {
                         val type = parameter.type.let { if (it.isFlexible()) it.makeNotNullable() else it }
@@ -85,6 +96,7 @@ class LambdaToAnonymousFunctionIntention : SelfTargetingIntention<KtLambdaExpres
                             param(parameter.name.asString(), renderType)
                         }
                     }
+
                     functionDescriptor.returnType?.takeIf { !it.isUnit() }?.let {
                         val lastStatement = bodyExpression.statements.lastOrNull()
                         if (lastStatement != null && lastStatement !is KtReturnExpression) {
@@ -103,6 +115,7 @@ class LambdaToAnonymousFunctionIntention : SelfTargetingIntention<KtLambdaExpres
                     blockBody(" " + bodyExpression.text)
                 }.asString()
             )
+
             return replaceElement(function).also { ShortenReferences.DEFAULT.process(it) }
         }
     }

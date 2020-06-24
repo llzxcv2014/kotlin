@@ -20,9 +20,7 @@ import org.jetbrains.kotlin.ir.expressions.*
 import org.jetbrains.kotlin.ir.expressions.impl.IrBlockImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrCallImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrConstImpl
-import org.jetbrains.kotlin.ir.types.isBoolean
-import org.jetbrains.kotlin.ir.types.isNullableAny
-import org.jetbrains.kotlin.ir.types.isPrimitiveType
+import org.jetbrains.kotlin.ir.types.*
 import org.jetbrains.kotlin.ir.util.*
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformer
 
@@ -40,10 +38,6 @@ class JvmOptimizationLowering(val context: JvmBackendContext) : FileLoweringPass
                     context.state.intrinsics.getIntrinsic(expression.symbol.descriptor) is Not
     }
 
-    private fun hasNoSideEffectsForNullCompare(expression: IrExpression): Boolean {
-        return expression.type.isPrimitiveType() && (expression is IrConst<*> || expression is IrGetValue)
-    }
-
     private val IrFunction.isObjectEquals
         get() = name.asString() == "equals" &&
                 valueParameters.count() == 1 &&
@@ -52,7 +46,7 @@ class JvmOptimizationLowering(val context: JvmBackendContext) : FileLoweringPass
                 dispatchReceiverParameter != null
 
 
-    private fun getOperandsIfCallToEqeqOrEquals(call: IrCall): Pair<IrExpression, IrExpression>? =
+    private fun getOperandsIfCallToEQEQOrEquals(call: IrCall): Pair<IrExpression, IrExpression>? =
         when {
             call.symbol == context.irBuiltIns.eqeqSymbol -> {
                 val left = call.getValueArgument(0)!!
@@ -95,6 +89,8 @@ class JvmOptimizationLowering(val context: JvmBackendContext) : FileLoweringPass
             override fun visitCall(expression: IrCall, currentClass: IrClass?): IrExpression {
                 expression.transformChildren(this, currentClass)
 
+                removeIntTypeSafeCastsForEquality(expression)
+
                 if (expression.symbol.owner.origin == IrDeclarationOrigin.DEFAULT_PROPERTY_ACCESSOR) {
                     if (currentClass == null) return expression
                     val simpleFunction = (expression.symbol.owner as? IrSimpleFunction) ?: return expression
@@ -107,7 +103,7 @@ class JvmOptimizationLowering(val context: JvmBackendContext) : FileLoweringPass
                     return (expression.dispatchReceiver as IrCall).dispatchReceiver!!
                 }
 
-                getOperandsIfCallToEqeqOrEquals(expression)?.let { (left, right) ->
+                getOperandsIfCallToEQEQOrEquals(expression)?.let { (left, right) ->
                     return when {
                         left.isNullConst() && right.isNullConst() ->
                             IrConstImpl.constTrue(expression.startOffset, expression.endOffset, context.irBuiltIns.booleanType)
@@ -120,6 +116,41 @@ class JvmOptimizationLowering(val context: JvmBackendContext) : FileLoweringPass
                 }
 
                 return expression
+            }
+
+            private fun IrType.isByteOrShort() = isByte() || isShort()
+
+            // For `==` and `!=`, get rid of safe calls to convert `Byte?` or `Short?` to `Int?`.
+            // For equality, we do not need to perform such conversions as the builtin for equality
+            // will handle it. Having the safe call leads to unnecessary null checks and boxing.
+            private fun removeIntTypeSafeCastsForEquality(expression: IrCall) {
+                if (expression.origin == IrStatementOrigin.EQEQ || expression.origin == IrStatementOrigin.EXCLEQ) {
+                    for (i in 0 until expression.valueArgumentsCount) {
+                        if (expression.getValueArgument(i)!!.type.makeNotNull().isInt()) {
+                            val argument = expression.getValueArgument(i)!!
+                            if (argument is IrBlock && argument.origin == IrStatementOrigin.SAFE_CALL) {
+                                if (argument.statements.size == 2) {
+                                    val variable = argument.statements[0]
+                                    if (variable is IrVariable && variable.type.makeNotNull().isByteOrShort()) {
+                                        val whenExpression = argument.statements[1]
+                                        if (whenExpression is IrWhen && whenExpression.branches.size == 2) {
+                                            val secondBranch = whenExpression.branches[1]
+                                            if (secondBranch is IrElseBranch && secondBranch.result is IrCall) {
+                                                val conversion = secondBranch.result as IrCall
+                                                if (conversion.symbol.owner.name.asString() == "toInt" &&
+                                                    conversion.dispatchReceiver is IrGetValue &&
+                                                    (conversion.dispatchReceiver as IrGetValue).symbol.owner == variable
+                                                ) {
+                                                    expression.putValueArgument(i, variable.initializer)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             private fun optimizePropertyAccess(

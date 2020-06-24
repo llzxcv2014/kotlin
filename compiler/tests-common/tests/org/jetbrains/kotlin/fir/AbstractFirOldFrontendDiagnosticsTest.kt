@@ -6,7 +6,7 @@
 package org.jetbrains.kotlin.fir
 
 import org.jetbrains.kotlin.fir.declarations.FirFile
-import org.jetbrains.kotlin.fir.resolve.transformers.FirTotalResolveTransformer
+import org.jetbrains.kotlin.fir.resolve.transformers.createAllCompilerResolveProcessors
 import org.jetbrains.kotlin.test.KotlinTestUtils
 import java.io.File
 
@@ -20,18 +20,22 @@ abstract class AbstractFirOldFrontendDiagnosticsTest : AbstractFirDiagnosticsTes
 
     private fun prepareTestDataFile(originalFilePath: String, firTestDataFile: File) {
         if (!firTestDataFile.exists()) {
-            KotlinTestUtils.assertEqualsToFile(firTestDataFile, loadTestDataWithoutDiagnostics(File(originalFilePath)))
+            KotlinTestUtils.assertEqualsToFile(firTestDataFile, loadTestDataWithDiagnostics(File(originalFilePath)))
         }
     }
 
+    override fun analyzeAndCheck(testDataFile: File, files: List<TestFile>) {
+        if (files.any { "FIR_IGNORE" in it.directives }) return
+        super.analyzeAndCheck(testDataFile, files)
+    }
+
     override fun runAnalysis(testDataFile: File, testFiles: List<TestFile>, firFilesPerSession: Map<FirSession, List<FirFile>>) {
-        if (testFiles.any { "FIR_IGNORE" in it.directives }) return
-        val failure: AssertionError? = try {
-            for ((_, firFiles) in firFilesPerSession) {
-                doFirResolveTestBench(firFiles, FirTotalResolveTransformer().transformers, gc = false)
+        val failure: FirRuntimeException? = try {
+            for ((session, firFiles) in firFilesPerSession) {
+                doFirResolveTestBench(firFiles, createAllCompilerResolveProcessors(session), gc = false)
             }
             null
-        } catch (e: AssertionError) {
+        } catch (e: FirRuntimeException) {
             e
         }
         val failureFile = File(testDataFile.path.replace(".kt", ".fail"))
@@ -49,6 +53,7 @@ abstract class AbstractFirOldFrontendDiagnosticsTest : AbstractFirDiagnosticsTes
             if (needDump) {
                 checkFir(testDataFile, allFirFiles)
             }
+            checkCfg(allFirFiles, testFiles, testDataFile)
         } else {
             if (!failureFile.exists()) {
                 throw failure
@@ -57,13 +62,11 @@ abstract class AbstractFirOldFrontendDiagnosticsTest : AbstractFirDiagnosticsTes
         }
     }
 
-    private fun checkFailureFile(failure: AssertionError, failureFile: File) {
+    private fun checkFailureFile(failure: FirRuntimeException, failureFile: File) {
         val failureMessage = buildString {
-            appendln(failure.message)
-            failure.cause?.let {
-                append("Cause: ")
-                appendln(it)
-            }
+            appendLine(failure.message)
+            append("Cause: ")
+            appendLine(failure.cause)
         }
         KotlinTestUtils.assertEqualsToFile(failureFile, failureMessage)
     }

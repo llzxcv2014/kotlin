@@ -6,7 +6,8 @@
 package org.jetbrains.kotlin.fir.scopes.impl
 
 import org.jetbrains.kotlin.fir.FirSession
-import org.jetbrains.kotlin.fir.resolve.FirSymbolProvider
+import org.jetbrains.kotlin.fir.resolve.firSymbolProvider
+import org.jetbrains.kotlin.fir.resolve.substitution.ConeSubstitutor
 import org.jetbrains.kotlin.fir.scopes.FirScope
 import org.jetbrains.kotlin.fir.symbols.impl.*
 import org.jetbrains.kotlin.name.ClassId
@@ -15,15 +16,15 @@ import org.jetbrains.kotlin.name.Name
 
 class FirPackageMemberScope(val fqName: FqName, val session: FirSession) : FirScope() {
 
-    private val symbolProvider = FirSymbolProvider.getInstance(session)
+    private val symbolProvider = session.firSymbolProvider
 
     private val classifierCache = mutableMapOf<Name, FirClassifierSymbol<*>?>()
 
     private val callableCache = mutableMapOf<Name, List<FirCallableSymbol<*>>>()
 
-    override fun processClassifiersByName(
+    override fun processClassifiersByNameWithSubstitution(
         name: Name,
-        processor: (FirClassifierSymbol<*>) -> Unit
+        processor: (FirClassifierSymbol<*>, ConeSubstitutor) -> Unit
     ) {
         if (name.asString().isEmpty()) return
 
@@ -34,7 +35,7 @@ class FirPackageMemberScope(val fqName: FqName, val session: FirSession) : FirSc
         }
 
         if (symbol != null) {
-            processor(symbol)
+            processor(symbol, ConeSubstitutor.Empty)
         }
     }
 

@@ -7,6 +7,7 @@ package org.jetbrains.kotlin.ir.declarations.impl
 
 import org.jetbrains.kotlin.descriptors.TypeAliasDescriptor
 import org.jetbrains.kotlin.descriptors.Visibility
+import org.jetbrains.kotlin.ir.ObsoleteDescriptorBasedAPI
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationOrigin
 import org.jetbrains.kotlin.ir.declarations.IrTypeAlias
 import org.jetbrains.kotlin.ir.declarations.IrTypeParameter
@@ -36,6 +37,7 @@ class IrTypeAliasImpl(
         symbol.bind(this)
     }
 
+    @ObsoleteDescriptorBasedAPI
     override val descriptor: TypeAliasDescriptor
         get() = symbol.descriptor
 
@@ -66,15 +68,16 @@ class IrTypeAliasImpl(
             endOffset: Int,
             symbol: IrTypeAliasSymbol,
             expandedType: IrType,
-            origin: IrDeclarationOrigin
+            origin: IrDeclarationOrigin,
+            descriptor: TypeAliasDescriptor
         ) =
             IrTypeAliasImpl(
                 startOffset, endOffset,
                 symbol,
-                symbol.descriptor.name,
-                symbol.descriptor.visibility,
+                descriptor.name,
+                descriptor.visibility,
                 expandedType,
-                symbol.descriptor.isActual,
+                descriptor.isActual,
                 origin
             )
     }

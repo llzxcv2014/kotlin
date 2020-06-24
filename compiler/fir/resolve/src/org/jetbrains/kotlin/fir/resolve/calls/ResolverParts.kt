@@ -11,11 +11,13 @@ import org.jetbrains.kotlin.fir.declarations.*
 import org.jetbrains.kotlin.fir.expressions.FirExpression
 import org.jetbrains.kotlin.fir.expressions.FirQualifiedAccessExpression
 import org.jetbrains.kotlin.fir.expressions.FirResolvedQualifier
+import org.jetbrains.kotlin.fir.inferenceContext
 import org.jetbrains.kotlin.fir.references.FirSuperReference
 import org.jetbrains.kotlin.fir.render
 import org.jetbrains.kotlin.fir.resolve.*
 import org.jetbrains.kotlin.fir.resolve.inference.ResolvedCallableReferenceAtom
 import org.jetbrains.kotlin.fir.resolve.inference.csBuilder
+import org.jetbrains.kotlin.fir.resolve.inference.extractInputOutputTypesFromCallableReferenceExpectedType
 import org.jetbrains.kotlin.fir.symbols.AbstractFirBasedSymbol
 import org.jetbrains.kotlin.fir.symbols.SyntheticSymbol
 import org.jetbrains.kotlin.fir.symbols.impl.FirCallableSymbol
@@ -131,8 +133,7 @@ internal sealed class CheckReceivers : ResolutionStage() {
                     expectedTypeRef = explicitReceiverExpression.typeRef,
                     sink = sink,
                     isReceiver = true,
-                    isDispatch = this is Dispatch,
-                    isSafeCall = callInfo.isSafeCall
+                    isDispatch = this is Dispatch
                 )
                 sink.yieldIfNeed()
             } else {
@@ -144,8 +145,7 @@ internal sealed class CheckReceivers : ResolutionStage() {
                         expectedType = candidate.substitutor.substituteOrSelf(expectedReceiverType.type),
                         sink = sink,
                         isReceiver = true,
-                        isDispatch = this is Dispatch,
-                        isSafeCall = callInfo.isSafeCall
+                        isDispatch = this is Dispatch
                     )
                     sink.yieldIfNeed()
                 }
@@ -186,7 +186,8 @@ internal object CheckArguments : CheckerStage() {
     override suspend fun check(candidate: Candidate, sink: CheckerSink, callInfo: CallInfo) {
         val argumentMapping =
             candidate.argumentMapping ?: throw IllegalStateException("Argument should be already mapped while checking arguments!")
-        for ((argument, parameter) in argumentMapping) {
+        for (argument in callInfo.arguments) {
+            val parameter = argumentMapping[argument]
             candidate.resolveArgument(
                 argument,
                 parameter,
@@ -231,9 +232,11 @@ internal object CheckCallableReferenceExpectedType : CheckerStage() {
         val returnTypeRef = candidate.bodyResolveComponents.returnTypeCalculator.tryCalculateReturnType(fir)
 
         val resultingType: ConeKotlinType = when (fir) {
-            is FirFunction -> createKFunctionType(
+            is FirFunction -> callInfo.session.createKFunctionType(
                 fir, resultingReceiverType, returnTypeRef,
-                expectedParameterNumberWithReceiver = expectedType?.let { it.typeArguments.size - 1 }
+                expectedParameterNumberWithReceiver = expectedType?.let { it.typeArguments.size - 1 },
+                isSuspend = (fir as? FirSimpleFunction)?.isSuspend == true,
+                expectedReturnType = extractInputOutputTypesFromCallableReferenceExpectedType(expectedType, callInfo.session)?.outputType
             )
             is FirVariable<*> -> createKPropertyType(fir, resultingReceiverType, returnTypeRef)
             else -> ConeKotlinErrorType("Unknown callable kind: ${fir::class}")
@@ -285,12 +288,15 @@ private fun createKPropertyType(
     )
 }
 
-private fun createKFunctionType(
+private fun FirSession.createKFunctionType(
     function: FirFunction<*>,
     receiverType: ConeKotlinType?,
     returnTypeRef: FirResolvedTypeRef,
-    expectedParameterNumberWithReceiver: Int?
+    expectedParameterNumberWithReceiver: Int?,
+    isSuspend: Boolean,
+    expectedReturnType: ConeKotlinType?
 ): ConeKotlinType {
+    // The similar adaptations: defaults and coercion-to-unit happen at org.jetbrains.kotlin.resolve.calls.components.CallableReferencesCandidateFactory.getCallableReferenceAdaptation
     val parameterTypes = mutableListOf<ConeKotlinType>()
     val expectedParameterNumber = when {
         expectedParameterNumberWithReceiver == null -> null
@@ -304,10 +310,17 @@ private fun createKFunctionType(
         }
     }
 
+    val returnType =
+        if (expectedReturnType != null && inferenceContext.run { expectedReturnType.isUnit() })
+            expectedReturnType
+        else
+            returnTypeRef.coneTypeSafe() ?: ConeKotlinErrorType("No type for return type of $function")
+
     return createFunctionalType(
         parameterTypes, receiverType = receiverType,
-        rawReturnType = returnTypeRef.coneTypeSafe() ?: ConeKotlinErrorType("No type for return type of $function"),
-        isKFunctionType = true
+        rawReturnType = returnType,
+        isKFunctionType = true,
+        isSuspend = isSuspend
     )
 }
 
@@ -332,54 +345,72 @@ internal object CheckVisibility : CheckerStage() {
     private fun ClassId.isSame(other: ClassId): Boolean =
         packageFqName == other.packageFqName && relativeClassName == other.relativeClassName
 
-    private fun ImplicitReceiverStack.canSeePrivateMemberOf(ownerId: ClassId): Boolean {
-        for (implicitReceiverValue in receiversAsReversed()) {
-            if (implicitReceiverValue !is ImplicitDispatchReceiverValue) continue
-            if (implicitReceiverValue.companionFromSupertype) continue
-            val boundSymbol = implicitReceiverValue.boundSymbol
+    private fun canSeePrivateMemberOf(
+        containingDeclarationOfUseSite: List<FirDeclaration>,
+        ownerId: ClassId,
+        session: FirSession
+    ): Boolean {
+        ownerId.ownerIfCompanion(session)?.let { companionOwnerClassId ->
+            return canSeePrivateMemberOf(containingDeclarationOfUseSite, companionOwnerClassId, session)
+        }
+
+        for (declaration in containingDeclarationOfUseSite) {
+            if (declaration !is FirClass<*>) continue
+            val boundSymbol = declaration.symbol
             if (boundSymbol.classId.isSame(ownerId)) {
                 return true
             }
         }
+
         return false
     }
 
-    private fun FirRegularClassSymbol.canSeeProtectedMemberOf(
-        ownerId: ClassId,
-        session: FirSession,
-        visited: MutableSet<ClassId>
-    ): Boolean {
-        if (classId in visited) return false
-        visited += classId
+    private fun ClassId.ownerIfCompanion(session: FirSession): ClassId? {
+        if (outerClassId == null || isLocal) return null
+        val ownerSymbol = session.firSymbolProvider.getClassLikeSymbolByFqName(this) as? FirRegularClassSymbol
+
+        return outerClassId.takeIf { ownerSymbol?.fir?.isCompanion == true }
+    }
+
+    private fun FirClass<*>.isSubClass(ownerId: ClassId, session: FirSession): Boolean {
         if (classId.isSame(ownerId)) return true
 
-        fir.companionObject?.let { companion ->
-            if (companion.classId.isSame(ownerId)) return true
+        return lookupSuperTypes(this, lookupInterfaces = true, deep = true, session).any { superType ->
+            (superType as? ConeClassLikeType)?.fullyExpandedType(session)?.lookupTag?.classId?.isSame(ownerId) == true
+        }
+    }
+
+    private fun canSeeProtectedMemberOf(
+        containingUseSiteClass: FirClass<*>,
+        dispatchReceiver: ReceiverValue?,
+        ownerId: ClassId, session: FirSession
+    ): Boolean {
+        dispatchReceiver?.ownerIfCompanion(session)?.let { companionOwnerClassId ->
+            if (containingUseSiteClass.isSubClass(companionOwnerClassId, session)) return true
         }
 
-        val superTypes = fir.superConeTypes
-        for (superType in superTypes) {
-            val superTypeSymbol = superType.lookupTag.toSymbol(session) as? FirRegularClassSymbol ?: continue
-            if (superTypeSymbol.canSeeProtectedMemberOf(ownerId, session, visited)) return true
+        // TODO: Add check for receiver, see org.jetbrains.kotlin.descriptors.Visibility#doesReceiverFitForProtectedVisibility
+        return containingUseSiteClass.isSubClass(ownerId, session)
+    }
+
+    private fun canSeeProtectedMemberOf(
+        containingDeclarationOfUseSite: List<FirDeclaration>,
+        dispatchReceiver: ReceiverValue?,
+        ownerId: ClassId, session: FirSession
+    ): Boolean {
+        if (canSeePrivateMemberOf(containingDeclarationOfUseSite, ownerId, session)) return true
+
+        for (containingDeclaration in containingDeclarationOfUseSite) {
+            if (containingDeclaration !is FirClass<*>) continue
+            val boundSymbol = containingDeclaration.symbol
+            if (canSeeProtectedMemberOf(boundSymbol.fir, dispatchReceiver, ownerId, session)) return true
         }
+
         return false
     }
 
-    private fun ImplicitReceiverStack.canSeeProtectedMemberOf(ownerId: ClassId, session: FirSession): Boolean {
-        if (canSeePrivateMemberOf(ownerId)) return true
-        val visited = mutableSetOf<ClassId>()
-        for (implicitReceiverValue in receiversAsReversed()) {
-            if (implicitReceiverValue !is ImplicitDispatchReceiverValue) continue
-            if (implicitReceiverValue.companionFromSupertype) continue
-            val boundSymbol = implicitReceiverValue.boundSymbol
-            val superTypes = boundSymbol.fir.superConeTypes
-            for (superType in superTypes) {
-                val superTypeSymbol = superType.lookupTag.toSymbol(session) as? FirRegularClassSymbol ?: continue
-                if (superTypeSymbol.canSeeProtectedMemberOf(ownerId, session, visited)) return true
-            }
-        }
-        return false
-    }
+    private fun ReceiverValue?.ownerIfCompanion(session: FirSession): ClassId? =
+        (this?.type as? ConeClassLikeType)?.lookupTag?.classId?.ownerIfCompanion(session)
 
     private fun AbstractFirBasedSymbol<*>.getOwnerId(): ClassId? {
         return when (this) {
@@ -406,17 +437,13 @@ internal object CheckVisibility : CheckerStage() {
         declaration: FirMemberDeclaration,
         symbol: AbstractFirBasedSymbol<*>,
         sink: CheckerSink,
-        callInfo: CallInfo
+        candidate: Candidate
     ): Boolean {
+        val callInfo = candidate.callInfo
         val useSiteFile = callInfo.containingFile
-        val implicitReceiverStack = callInfo.implicitReceiverStack
+        val containingDeclarations = callInfo.containingDeclarations
         val session = callInfo.session
         val provider = session.firProvider
-        val candidateFile = when (symbol) {
-            is FirClassLikeSymbol<*> -> provider.getFirClassifierContainerFileIfAny(symbol)
-            is FirCallableSymbol<*> -> provider.getFirCallableContainerFile(symbol)
-            else -> null
-        }
         val ownerId = symbol.getOwnerId()
         val visible = when (declaration.visibility) {
             JavaVisibilities.PACKAGE_VISIBILITY -> {
@@ -428,24 +455,29 @@ internal object CheckVisibility : CheckerStage() {
             Visibilities.PRIVATE, Visibilities.PRIVATE_TO_THIS -> {
                 if (declaration.session == callInfo.session) {
                     if (ownerId == null || declaration is FirConstructor && declaration.isFromSealedClass) {
+                        val candidateFile = when (symbol) {
+                            is FirClassLikeSymbol<*> -> provider.getFirClassifierContainerFileIfAny(symbol)
+                            is FirCallableSymbol<*> -> provider.getFirCallableContainerFile(symbol)
+                            else -> null
+                        }
                         // Top-level: visible in file
                         candidateFile == useSiteFile
                     } else {
                         // Member: visible inside parent class, including all its member classes
-                        implicitReceiverStack.canSeePrivateMemberOf(ownerId)
+                        canSeePrivateMemberOf(containingDeclarations, ownerId, session)
                     }
                 } else {
                     false
                 }
             }
             Visibilities.PROTECTED -> {
-                ownerId != null && implicitReceiverStack.canSeeProtectedMemberOf(ownerId, session)
+                ownerId != null && canSeeProtectedMemberOf(containingDeclarations, candidate.dispatchReceiverValue, ownerId, session)
             }
             JavaVisibilities.PROTECTED_AND_PACKAGE, JavaVisibilities.PROTECTED_STATIC_VISIBILITY -> {
                 if (symbol.packageFqName() == useSiteFile.packageFqName) {
                     true
                 } else {
-                    ownerId != null && implicitReceiverStack.canSeeProtectedMemberOf(ownerId, session)
+                    ownerId != null && canSeeProtectedMemberOf(containingDeclarations, candidate.dispatchReceiverValue, ownerId, session)
                 }
             }
             else -> true
@@ -462,7 +494,7 @@ internal object CheckVisibility : CheckerStage() {
         val symbol = candidate.symbol
         val declaration = symbol.fir
         if (declaration is FirMemberDeclaration) {
-            if (!checkVisibility(declaration, symbol, sink, callInfo)) {
+            if (!checkVisibility(declaration, symbol, sink, candidate)) {
                 return
             }
         }
@@ -473,7 +505,10 @@ internal object CheckVisibility : CheckerStage() {
             val classSymbol = provider.getClassLikeSymbolByFqName(ownerClassId)
 
             if (classSymbol is FirRegularClassSymbol) {
-                checkVisibility(classSymbol.fir, classSymbol, sink, callInfo)
+                if (classSymbol.fir.classKind.isSingleton) {
+                    sink.yieldApplicability(CandidateApplicability.HIDDEN)
+                }
+                checkVisibility(classSymbol.fir, classSymbol, sink, candidate)
             }
         }
     }

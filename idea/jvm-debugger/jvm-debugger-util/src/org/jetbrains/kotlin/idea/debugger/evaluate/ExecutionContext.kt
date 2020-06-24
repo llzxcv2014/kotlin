@@ -42,6 +42,13 @@ class DefaultExecutionContext(evaluationContext: EvaluationContextImpl) : BaseEx
     val frameProxy: StackFrameProxyImpl?
         get() =
             evaluationContext.frameProxy
+
+    fun keepReference(ref: ObjectReference?): ObjectReference? {
+        ref?.let {
+            super.keepReference(ref)
+        }
+        return ref
+    }
 }
 
 sealed class BaseExecutionContext(val evaluationContext: EvaluationContextImpl) {
@@ -128,6 +135,9 @@ sealed class BaseExecutionContext(val evaluationContext: EvaluationContextImpl) 
     fun findClassSafe(className: String): ClassType? =
         hopelessAware { findClass(className) as? ClassType }
 
+    fun invokeMethodSafe(type: ClassType, method: Method, args: List<Value?>): Value? {
+        return hopelessAware { debugProcess.invokeMethod(evaluationContext, type, method, args) }
+    }
 
     fun invokeMethodAsString(instance: ObjectReference, methodName: String): String? =
         (findAndInvoke(instance, instance.referenceType(), methodName, "()Ljava/lang/String;") as? StringReference)?.value() ?: null
@@ -194,6 +204,7 @@ sealed class BaseExecutionContext(val evaluationContext: EvaluationContextImpl) 
 
     fun findAndInvoke(instance: ObjectReference, name: String, methodSignature: String? = null, vararg params: Value): Value? {
         val type = instance.referenceType()
+        type.allMethods()
         val method =
             if (methodSignature is String)
                 type.methodsByName(name, methodSignature).single()

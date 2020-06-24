@@ -14,10 +14,7 @@ import org.jetbrains.kotlin.config.CompilerConfiguration
 import org.jetbrains.kotlin.descriptors.*
 import org.jetbrains.kotlin.descriptors.impl.EmptyPackageFragmentDescriptor
 import org.jetbrains.kotlin.incremental.components.NoLookupLocation
-import org.jetbrains.kotlin.ir.IrElement
-import org.jetbrains.kotlin.ir.SourceManager
-import org.jetbrains.kotlin.ir.SourceRangeInfo
-import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
+import org.jetbrains.kotlin.ir.*
 import org.jetbrains.kotlin.ir.backend.js.ir.JsIrBuilder
 import org.jetbrains.kotlin.ir.backend.js.utils.OperatorNames
 import org.jetbrains.kotlin.ir.declarations.*
@@ -41,7 +38,8 @@ class JsIrBackendContext(
     irModuleFragment: IrModuleFragment,
     val additionalExportedDeclarations: Set<FqName>,
     override val configuration: CompilerConfiguration, // TODO: remove configuration from backend context
-    override val scriptMode: Boolean = false
+    override val scriptMode: Boolean = false,
+    override val es6mode: Boolean = false
 ) : JsCommonBackendContext {
     override val transformedFunction
         get() = error("Use Mapping.inlineClassMemberToStatic instead")
@@ -59,6 +57,8 @@ class JsIrBackendContext(
 
     val externalPackageFragment = mutableMapOf<IrFileSymbol, IrFile>()
     val externalDeclarations = hashSetOf<IrDeclaration>()
+
+    @OptIn(ObsoleteDescriptorBasedAPI::class)
     val bodilessBuiltInsPackageFragment: IrPackageFragment = run {
 
         class DescriptorlessExternalPackageFragmentSymbol : IrExternalPackageFragmentSymbol {
@@ -90,8 +90,8 @@ class JsIrBackendContext(
     val packageLevelJsModules = mutableSetOf<IrFile>()
     val declarationLevelJsModules = mutableListOf<IrDeclarationWithName>()
 
-    val internalPackageFragmentDescriptor = EmptyPackageFragmentDescriptor(builtIns.builtInsModule, FqName("kotlin.js.internal"))
-    val implicitDeclarationFile by lazy2 {
+    private val internalPackageFragmentDescriptor = EmptyPackageFragmentDescriptor(builtIns.builtInsModule, FqName("kotlin.js.internal"))
+    val implicitDeclarationFile = run {
         IrFileImpl(object : SourceManager.FileEntry {
             override val name = "<implicitDeclarations>"
             override val maxOffset = UNDEFINED_OFFSET
@@ -124,8 +124,6 @@ class JsIrBackendContext(
             testContainerField = this
             implicitDeclarationFile.declarations += this
         }
-
-    override val sharedVariablesManager = JsSharedVariablesManager(irBuiltIns, implicitDeclarationFile)
 
     override val mapping = JsMapping()
     override val declarationFactory = JsDeclarationFactory(mapping)
@@ -162,7 +160,10 @@ class JsIrBackendContext(
     private val coroutinePackage = module.getPackage(COROUTINE_PACKAGE_FQNAME)
     private val coroutineIntrinsicsPackage = module.getPackage(COROUTINE_INTRINSICS_PACKAGE_FQNAME)
 
+    val dynamicType: IrDynamicType = IrDynamicTypeImpl(null, emptyList(), Variance.INVARIANT)
     val intrinsics = JsIntrinsics(irBuiltIns, this)
+
+    override val sharedVariablesManager = JsSharedVariablesManager(this)
 
     override val internalPackageFqn = JS_PACKAGE_FQNAME
 
@@ -176,12 +177,10 @@ class JsIrBackendContext(
         return numbers + listOf(Name.identifier("String"), Name.identifier("Boolean"))
     }
 
-    val dynamicType: IrDynamicType = IrDynamicTypeImpl(null, emptyList(), Variance.INVARIANT)
-
     fun getOperatorByName(name: Name, type: IrSimpleType) = operatorMap[name]?.get(type.classifier)
 
     override val ir = object : Ir<JsIrBackendContext>(this, irModuleFragment) {
-        override val symbols = object : Symbols<JsIrBackendContext>(this@JsIrBackendContext, symbolTable) {
+        override val symbols = object : Symbols<JsIrBackendContext>(this@JsIrBackendContext, irBuiltIns, symbolTable) {
             override val ThrowNullPointerException =
                 symbolTable.referenceSimpleFunction(getFunctions(kotlinPackageFqn.child(Name.identifier("THROW_NPE"))).single())
 
@@ -193,6 +192,9 @@ class JsIrBackendContext(
 
             override val ThrowUninitializedPropertyAccessException =
                 symbolTable.referenceSimpleFunction(getFunctions(FqName("kotlin.throwUninitializedPropertyAccessException")).single())
+
+            override val ThrowKotlinNothingValueException: IrSimpleFunctionSymbol =
+                symbolTable.referenceSimpleFunction(getFunctions(FqName("kotlin.throwKotlinNothingValueException")).single())
 
             override val defaultConstructorMarker =
                 symbolTable.referenceClass(context.getJsInternalClass("DefaultConstructorMarker"))
@@ -215,7 +217,8 @@ class JsIrBackendContext(
 
             override val coroutineContextGetter = symbolTable.referenceSimpleFunction(context.coroutineContextProperty.getter!!)
 
-            override val suspendCoroutineUninterceptedOrReturn = symbolTable.referenceSimpleFunction(getJsInternalFunction(COROUTINE_SUSPEND_OR_RETURN_JS_NAME))
+            override val suspendCoroutineUninterceptedOrReturn =
+                symbolTable.referenceSimpleFunction(getJsInternalFunction(COROUTINE_SUSPEND_OR_RETURN_JS_NAME))
 
             override val coroutineGetContext = symbolTable.referenceSimpleFunction(getJsInternalFunction(GET_COROUTINE_CONTEXT_NAME))
 
@@ -276,6 +279,7 @@ class JsIrBackendContext(
 
     val newThrowableSymbol = symbolTable.referenceSimpleFunction(getJsInternalFunction("newThrowable"))
     val extendThrowableSymbol = symbolTable.referenceSimpleFunction(getJsInternalFunction("extendThrowable"))
+    val setPropertiesToThrowableInstanceSymbol = symbolTable.referenceSimpleFunction(getJsInternalFunction("setPropertiesToThrowableInstance"))
 
     val throwISEsymbol = symbolTable.referenceSimpleFunction(getFunctions(kotlinPackageFqn.child(Name.identifier("THROW_ISE"))).single())
     val throwIAEsymbol = symbolTable.referenceSimpleFunction(getFunctions(kotlinPackageFqn.child(Name.identifier("THROW_IAE"))).single())

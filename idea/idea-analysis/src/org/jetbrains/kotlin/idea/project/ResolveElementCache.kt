@@ -6,6 +6,7 @@
 package org.jetbrains.kotlin.idea.project
 
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.roots.ProjectRootModificationTracker
 import com.intellij.psi.util.CachedValue
 import com.intellij.psi.util.CachedValueProvider
 import com.intellij.psi.util.CachedValuesManager
@@ -22,6 +23,7 @@ import org.jetbrains.kotlin.frontend.di.createContainerForBodyResolve
 import org.jetbrains.kotlin.idea.caches.resolve.CodeFragmentAnalyzer
 import org.jetbrains.kotlin.idea.caches.resolve.util.analyzeControlFlow
 import org.jetbrains.kotlin.idea.caches.trackers.KotlinCodeBlockModificationListener
+import org.jetbrains.kotlin.idea.caches.trackers.KotlinCodeBlockModificationListenerCompat
 import org.jetbrains.kotlin.idea.caches.trackers.inBlockModificationCount
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.platform.TargetPlatform
@@ -57,7 +59,7 @@ class ResolveElementCache(
                 // data on any modification of the file
                 !file.isPhysical -> file.modificationStamp
 
-                resolveElement is KtDeclaration && KotlinCodeBlockModificationListener.isBlockDeclaration(resolveElement) -> resolveElement.getModificationStamp()
+                resolveElement is KtDeclaration && KotlinCodeBlockModificationListenerCompat.isBlockDeclaration(resolveElement) -> resolveElement.getModificationStamp()
                 resolveElement is KtSuperTypeList -> resolveElement.modificationStamp
                 else -> null
             }
@@ -71,7 +73,8 @@ class ResolveElementCache(
                 CachedValueProvider.Result.create(
                     ContainerUtil.createConcurrentWeakKeySoftValueMap<KtElement, CachedFullResolve>(),
                     KotlinCodeBlockModificationListener.getInstance(project).kotlinOutOfCodeBlockTracker,
-                    resolveSession.exceptionTracker
+                    resolveSession.exceptionTracker,
+                    rootsChangedTracker
                 )
             },
             false
@@ -110,11 +113,14 @@ class ResolveElementCache(
                 CachedValueProvider.Result.create(
                     slruCache,
                     KotlinCodeBlockModificationListener.getInstance(project).kotlinOutOfCodeBlockTracker,
-                    resolveSession.exceptionTracker
+                    resolveSession.exceptionTracker,
+                    rootsChangedTracker
                 )
             },
             false
         )
+
+    private val rootsChangedTracker = ProjectRootModificationTracker.getInstance(project)
 
     override fun resolveFunctionBody(function: KtNamedFunction) = getElementsAdditionalResolve(function, null, BodyResolveMode.FULL)
 
@@ -232,7 +238,7 @@ class ResolveElementCache(
     }
 
     fun resolveToElements(elements: Collection<KtElement>, bodyResolveMode: BodyResolveMode = BodyResolveMode.FULL): BindingContext {
-        val elementsByAdditionalResolveElement: Map<KtElement?, List<KtElement>> = elements.groupBy { findElementOfAdditionalResolve(it) }
+        val elementsByAdditionalResolveElement: Map<KtElement?, List<KtElement>> = elements.groupBy { findElementOfAdditionalResolve(it, bodyResolveMode) }
 
         val bindingContexts = ArrayList<BindingContext>()
         val declarationsToResolve = ArrayList<KtDeclaration>()
@@ -266,7 +272,10 @@ class ResolveElementCache(
         return CompositeBindingContext.create(bindingContexts)
     }
 
-    private fun findElementOfAdditionalResolve(element: KtElement): KtElement? {
+    private fun findElementOfAdditionalResolve(element: KtElement, bodyResolveMode: BodyResolveMode): KtElement? {
+        if (element is KtAnnotationEntry && bodyResolveMode == BodyResolveMode.PARTIAL_NO_ADDITIONAL)
+            return element
+
         val elementOfAdditionalResolve = KtPsiUtil.getTopmostParentOfTypes(
             element,
             KtNamedFunction::class.java,

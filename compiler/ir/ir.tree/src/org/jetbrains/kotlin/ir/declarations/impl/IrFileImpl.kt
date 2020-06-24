@@ -17,6 +17,7 @@
 package org.jetbrains.kotlin.ir.declarations.impl
 
 import org.jetbrains.kotlin.descriptors.PackageFragmentDescriptor
+import org.jetbrains.kotlin.ir.ObsoleteDescriptorBasedAPI
 import org.jetbrains.kotlin.ir.IrElementBase
 import org.jetbrains.kotlin.ir.SourceManager
 import org.jetbrains.kotlin.ir.declarations.*
@@ -37,11 +38,6 @@ class IrFileImpl(
 
     constructor(
         fileEntry: SourceManager.FileEntry,
-        symbol: IrFileSymbol
-    ) : this(fileEntry, symbol, symbol.descriptor.fqName)
-
-    constructor(
-        fileEntry: SourceManager.FileEntry,
         packageFragmentDescriptor: PackageFragmentDescriptor
     ) : this(fileEntry, IrFileSymbolImpl(packageFragmentDescriptor), packageFragmentDescriptor.fqName)
 
@@ -49,6 +45,7 @@ class IrFileImpl(
         symbol.bind(this)
     }
 
+    @ObsoleteDescriptorBasedAPI
     override val packageFragmentDescriptor: PackageFragmentDescriptor get() = symbol.descriptor
 
     override val declarations: MutableList<IrDeclaration> = ArrayList()

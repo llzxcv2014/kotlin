@@ -11,6 +11,7 @@ import org.jetbrains.kotlin.descriptors.ClassDescriptor
 import org.jetbrains.kotlin.descriptors.ClassKind
 import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.descriptors.Visibilities
+import org.jetbrains.kotlin.ir.ObsoleteDescriptorBasedAPI
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.descriptors.IrBuiltIns
 import org.jetbrains.kotlin.ir.expressions.IrConst
@@ -30,6 +31,7 @@ import org.jetbrains.kotlin.types.checker.convertVariance
 import org.jetbrains.kotlin.types.model.*
 import org.jetbrains.kotlin.ir.types.isPrimitiveType as irTypePredicates_isPrimitiveType
 
+@OptIn(ObsoleteDescriptorBasedAPI::class)
 interface IrTypeSystemContext : TypeSystemContext, TypeSystemCommonSuperTypesContext, TypeSystemCommonBackendContext {
 
     val irBuiltIns: IrBuiltIns
@@ -110,7 +112,7 @@ interface IrTypeSystemContext : TypeSystemContext, TypeSystemCommonSuperTypesCon
     private fun getTypeParameters(typeConstructor: TypeConstructorMarker): List<IrTypeParameter> {
         return when (typeConstructor) {
             is IrTypeParameterSymbol -> emptyList()
-            is IrClassSymbol -> typeConstructor.owner.typeParameters
+            is IrClassSymbol -> extractTypeParameters(typeConstructor.owner)
             else -> error("unsupported type constructor")
         }
     }
@@ -222,10 +224,12 @@ interface IrTypeSystemContext : TypeSystemContext, TypeSystemCommonSuperTypesCon
         return IrDynamicTypeImpl(null, emptyList(), Variance.INVARIANT)
     }
 
+    // TODO: implement taking into account `isExtensionFunction`
     override fun createSimpleType(
         constructor: TypeConstructorMarker,
         arguments: List<TypeArgumentMarker>,
-        nullable: Boolean
+        nullable: Boolean,
+        isExtensionFunction: Boolean
     ): SimpleTypeMarker = IrSimpleTypeImpl(constructor as IrClassifierSymbol, nullable, arguments.map { it as IrTypeArgument }, emptyList())
 
     private fun TypeVariance.convertVariance(): Variance {
@@ -242,6 +246,11 @@ interface IrTypeSystemContext : TypeSystemContext, TypeSystemCommonSuperTypesCon
     override fun createStarProjection(typeParameter: TypeParameterMarker) = IrStarProjectionImpl
 
     override fun KotlinTypeMarker.canHaveUndefinedNullability() = this is IrSimpleType && classifier is IrTypeParameterSymbol
+
+    override fun SimpleTypeMarker.isExtensionFunction(): Boolean {
+        require(this is IrSimpleType)
+        return this.hasAnnotation(KotlinBuiltIns.FQ_NAMES.extensionFunctionType)
+    }
 
     override fun SimpleTypeMarker.typeDepth(): Int {
         val maxInArguments = (this as IrSimpleType).arguments.asSequence().map {
@@ -296,9 +305,7 @@ interface IrTypeSystemContext : TypeSystemContext, TypeSystemCommonSuperTypesCon
     }
 
     override fun KotlinTypeMarker.hasAnnotation(fqName: FqName): Boolean =
-        // TODO: don't fall back to KotlinType to check annotations. Currently testIdentityEquals fails on JVM without it
-        (this as IrAnnotationContainer).hasAnnotation(fqName) ||
-                (this as IrType).toKotlinType().annotations.hasAnnotation(fqName)
+        (this as IrAnnotationContainer).hasAnnotation(fqName)
 
     override fun KotlinTypeMarker.getAnnotationFirstArgumentValue(fqName: FqName): Any? =
         (this as? IrType)?.annotations?.firstOrNull { annotation ->

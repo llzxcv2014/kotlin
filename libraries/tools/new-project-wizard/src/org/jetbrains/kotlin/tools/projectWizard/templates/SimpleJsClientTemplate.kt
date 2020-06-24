@@ -5,13 +5,13 @@
 
 package org.jetbrains.kotlin.tools.projectWizard.templates
 
+
+import org.jetbrains.annotations.Nls
+import org.jetbrains.annotations.NonNls
 import org.jetbrains.kotlin.tools.projectWizard.WizardGradleRunConfiguration
 import org.jetbrains.kotlin.tools.projectWizard.WizardRunConfiguration
-import org.jetbrains.kotlin.tools.projectWizard.core.context.ReadingContext
-import org.jetbrains.kotlin.tools.projectWizard.core.context.WritingContext
 import org.jetbrains.kotlin.tools.projectWizard.core.*
-import org.jetbrains.kotlin.tools.projectWizard.core.entity.TemplateSetting
-import org.jetbrains.kotlin.tools.projectWizard.core.safeAs
+import org.jetbrains.kotlin.tools.projectWizard.core.entity.settings.TemplateSetting
 import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.*
 import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.gradle.*
 import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.gradle.multiplatform.DefaultTargetConfigurationIR
@@ -27,54 +27,64 @@ import org.jetbrains.kotlin.tools.projectWizard.settings.buildsystem.*
 import org.jetbrains.kotlin.tools.projectWizard.settings.version.Version
 import org.jetbrains.kotlin.tools.projectWizard.transformers.interceptors.TemplateInterceptor
 import org.jetbrains.kotlin.tools.projectWizard.transformers.interceptors.interceptTemplate
+import org.jetbrains.kotlin.tools.projectWizard.KotlinNewProjectWizardBundle
+import org.jetbrains.kotlin.tools.projectWizard.Versions
+import org.jetbrains.kotlin.tools.projectWizard.plugins.kotlin.KotlinPlugin
 
 class SimpleJsClientTemplate : Template() {
-    override val title: String = "JS client"
-    override val htmlDescription: String = title
+    override val title: String = KotlinNewProjectWizardBundle.message("module.template.js.simple.title")
+    override val description: String = KotlinNewProjectWizardBundle.message("module.template.js.simple.description")
+
     override val moduleTypes: Set<ModuleType> = setOf(ModuleType.js)
+
+    @NonNls
     override val id: String = "simpleJsClient"
 
     override fun isApplicableTo(module: Module): Boolean =
         module.configurator == JsBrowserTargetConfigurator
                 || module.configurator == JsSingleplatformModuleConfigurator
 
-    val renderEngine by enumSetting<RenderEngine>("Rendering engine", GenerationPhase.PROJECT_GENERATION) {
-        defaultValue = RenderEngine.REACT_WITH_STYLED
+    val renderEngine by enumSetting<RenderEngine>(
+        KotlinNewProjectWizardBundle.message("module.template.js.simple.setting.rendering.engine"),
+        GenerationPhase.PROJECT_GENERATION
+    ) {
+        defaultValue = value(RenderEngine.REACT_WITH_STYLED)
     }
 
     override val settings: List<TemplateSetting<*, *>> = listOf(renderEngine)
 
-    override fun ReadingContext.createRunConfigurations(module: ModuleIR): List<WizardRunConfiguration> = buildList {
+    override fun Reader.createRunConfigurations(module: ModuleIR): List<WizardRunConfiguration> = buildList {
         if (module.originalModule.kind == ModuleKind.singleplatformJs) {
             +WizardGradleRunConfiguration(
-                "BrowserDevelopmentRun in continuous mode",
+                KotlinNewProjectWizardBundle.message("module.template.js.simple.run.configuration.dev"),
                 "browserDevelopmentRun",
                 listOf("--continuous")
             )
             +WizardGradleRunConfiguration(
-                "BrowserProductionRun in continuous mode",
+                KotlinNewProjectWizardBundle.message("module.template.js.simple.run.configuration.prod"),
                 "browserProductionRun",
                 listOf("--continuous")
             )
         }
     }
 
-    override fun WritingContext.getRequiredLibraries(module: ModuleIR): List<DependencyIR> = withSettingsOf(module.originalModule) {
+    override fun Writer.getRequiredLibraries(module: ModuleIR): List<DependencyIR> = withSettingsOf(module.originalModule) {
         buildList {
             +ArtifactBasedLibraryDependencyIR(
                 MavenArtifact(DefaultRepository.JCENTER, "org.jetbrains.kotlinx", "kotlinx-html-js"),
-                Version.fromString("0.6.12"),
+                Versions.KOTLINX.KOTLINX_HTML,
                 DependencyType.MAIN
             )
 
+            val kotlinVersion = KotlinPlugin::version.propertyValue
             if (renderEngine.reference.settingValue != RenderEngine.KOTLINX_HTML) {
-                +Dependencies.KOTLIN_REACT
-                +Dependencies.KOTLIN_REACT_DOM
+                +Dependencies.KOTLIN_REACT(kotlinVersion.version)
+                +Dependencies.KOTLIN_REACT_DOM(kotlinVersion.version)
                 +Dependencies.NPM_REACT
                 +Dependencies.NPM_REACT_DOM
                 if (renderEngine.reference.settingValue == RenderEngine.REACT_WITH_STYLED) {
                     +Dependencies.NPM_REACT_IS
-                    +Dependencies.KOTLIN_STYLED
+                    +Dependencies.KOTLIN_STYLED(kotlinVersion.version)
                     +Dependencies.NPM_STYLED_COMPONENTS
                     +Dependencies.NPM_INLINE_STYLE_PREFIXER
                 }
@@ -83,7 +93,7 @@ class SimpleJsClientTemplate : Template() {
     }
 
 
-    override fun WritingContext.getFileTemplates(module: ModuleIR): List<FileTemplateDescriptorWithPath> =
+    override fun Reader.getFileTemplates(module: ModuleIR): List<FileTemplateDescriptorWithPath> =
         withSettingsOf(module.originalModule) {
             buildList {
                 val hasKtorServNeighbourTarget = module.safeAs<MultiplatformModuleIR>()
@@ -109,6 +119,9 @@ class SimpleJsClientTemplate : Template() {
             }
         }
 
+    override fun Reader.getAdditionalSettings(module: Module): Map<String, Any> = withSettingsOf(module) {
+        mapOf("useStyledComponents" to (renderEngine.reference.settingValue == RenderEngine.REACT_WITH_STYLED))
+    }
 
     override fun createInterceptors(module: ModuleIR): List<TemplateInterceptor> = buildList {
         +interceptTemplate(KtorServerTemplate()) {
@@ -202,7 +215,7 @@ class SimpleJsClientTemplate : Template() {
         }
     }
 
-    override fun WritingContext.getIrsToAddToBuildFile(module: ModuleIR): List<BuildSystemIR> = buildList {
+    override fun Writer.getIrsToAddToBuildFile(module: ModuleIR): List<BuildSystemIR> = buildList {
         +RepositoryIR(DefaultRepository.JCENTER)
         if (module is MultiplatformModuleIR) {
             +GradleImportIR("org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpack")
@@ -223,58 +236,69 @@ class SimpleJsClientTemplate : Template() {
     }
 
     companion object {
+        @NonNls
         private const val JS_OUTPUT_FILE_NAME = "output.js"
+
+        @NonNls
         private const val WEBPACK_TASK_CLASS = "KotlinWebpack"
+
+        @NonNls
         private const val WEBPACK_TASK_SUFFIX = "BrowserProductionWebpack"
     }
 
     private object Dependencies {
-        val KOTLIN_REACT = ArtifactBasedLibraryDependencyIR(
-            MavenArtifact(Repositories.KOTLIN_JS_WRAPPERS_BINTRAY, "org.jetbrains", "kotlin-react"),
-            Version.fromString("16.9.0-pre.89-kotlin-1.3.60"),
-            DependencyType.MAIN
-        )
-        val KOTLIN_REACT_DOM = ArtifactBasedLibraryDependencyIR(
-            MavenArtifact(Repositories.KOTLIN_JS_WRAPPERS_BINTRAY, "org.jetbrains", "kotlin-react-dom"),
-            Version.fromString("16.9.0-pre.89-kotlin-1.3.60"),
-            DependencyType.MAIN
-        )
-        val KOTLIN_STYLED = ArtifactBasedLibraryDependencyIR(
-            MavenArtifact(Repositories.KOTLIN_JS_WRAPPERS_BINTRAY, "org.jetbrains", "kotlin-styled"),
-            Version.fromString("1.0.0-pre.89-kotlin-1.3.60"),
-            DependencyType.MAIN
-        )
+        val KOTLIN_REACT = { kotlinVersion: Version ->
+            ArtifactBasedLibraryDependencyIR(
+                MavenArtifact(Repositories.KOTLIN_JS_WRAPPERS_BINTRAY, "org.jetbrains", "kotlin-react"),
+                Versions.JS_WRAPPERS.KOTLIN_REACT(kotlinVersion),
+                DependencyType.MAIN
+            )
+        }
+        val KOTLIN_REACT_DOM = { kotlinVersion: Version ->
+            ArtifactBasedLibraryDependencyIR(
+                MavenArtifact(Repositories.KOTLIN_JS_WRAPPERS_BINTRAY, "org.jetbrains", "kotlin-react-dom"),
+                Versions.JS_WRAPPERS.KOTLIN_REACT_DOM(kotlinVersion),
+                DependencyType.MAIN
+            )
+        }
+        val KOTLIN_STYLED = { kotlinVersion: Version ->
+            ArtifactBasedLibraryDependencyIR(
+                MavenArtifact(Repositories.KOTLIN_JS_WRAPPERS_BINTRAY, "org.jetbrains", "kotlin-styled"),
+                Versions.JS_WRAPPERS.KOTLIN_STYLED(kotlinVersion),
+                DependencyType.MAIN
+            )
+        }
 
         val NPM_REACT = ArtifactBasedLibraryDependencyIR(
             NpmArtifact("react"),
-            Version.fromString("16.12.0"),
+            Versions.NPM.REACT,
             DependencyType.MAIN
         )
         val NPM_REACT_DOM = ArtifactBasedLibraryDependencyIR(
             NpmArtifact("react-dom"),
-            Version.fromString("16.12.0"),
+            Versions.NPM.REACT_DOM,
             DependencyType.MAIN
         )
         val NPM_REACT_IS = ArtifactBasedLibraryDependencyIR(
             NpmArtifact("react-is"),
-            Version.fromString("16.12.0"),
+            Versions.NPM.REACT_IS,
             DependencyType.MAIN
         )
         val NPM_STYLED_COMPONENTS = ArtifactBasedLibraryDependencyIR(
             NpmArtifact("styled-components"),
-            Version.fromString("5.0.0"),
+            Versions.NPM.STYLED_COMPONENTS,
             DependencyType.MAIN
         )
         val NPM_INLINE_STYLE_PREFIXER = ArtifactBasedLibraryDependencyIR(
             NpmArtifact("inline-style-prefixer"),
-            Version.fromString("5.1.0"),
+            Versions.NPM.INLINE_STYLE_PREFIXER,
             DependencyType.MAIN
         )
     }
 
-    enum class RenderEngine(override val text: String) : DisplayableSettingItem {
-        KOTLINX_HTML("Use statically typed Kotlinx.html DSL"),
-        REACT("Use Kotlin-wrapped React library"),
-        REACT_WITH_STYLED("Use Kotlin-wrapped React framework together with Styled Components"),
+    enum class RenderEngine(@Nls override val text: String) : DisplayableSettingItem {
+        KOTLINX_HTML(KotlinNewProjectWizardBundle.message("module.template.js.simple.setting.rendering.kotlinx.html")),
+        REACT(KotlinNewProjectWizardBundle.message("module.template.js.simple.setting.rendering.react")),
+        REACT_WITH_STYLED(KotlinNewProjectWizardBundle.message("module.template.js.simple.setting.rendering.react.styled"))
     }
 }

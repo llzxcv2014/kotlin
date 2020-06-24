@@ -28,6 +28,7 @@ import org.jetbrains.kotlin.descriptors.annotations.*;
 import org.jetbrains.kotlin.descriptors.impl.AnonymousFunctionDescriptor;
 import org.jetbrains.kotlin.incremental.components.NoLookupLocation;
 import org.jetbrains.kotlin.load.java.JvmAnnotationNames;
+import org.jetbrains.kotlin.name.ClassId;
 import org.jetbrains.kotlin.name.FqName;
 import org.jetbrains.kotlin.name.Name;
 import org.jetbrains.kotlin.resolve.AnnotationChecker;
@@ -40,7 +41,6 @@ import org.jetbrains.kotlin.types.FlexibleType;
 import org.jetbrains.kotlin.types.FlexibleTypesKt;
 import org.jetbrains.kotlin.types.KotlinType;
 import org.jetbrains.kotlin.types.TypeUtils;
-import org.jetbrains.kotlin.types.checker.SimpleClassicTypeSystemContext;
 import org.jetbrains.org.objectweb.asm.*;
 
 import java.lang.annotation.*;
@@ -106,6 +106,16 @@ public abstract class AnnotationCodegen {
             @Nullable Type returnType,
             @Nullable KotlinType typeForTypeAnnotations
     ) {
+        genAnnotations(annotated, returnType, typeForTypeAnnotations, null, Collections.emptyList());
+    }
+
+    public void genAnnotations(
+            @Nullable Annotated annotated,
+            @Nullable Type returnType,
+            @Nullable KotlinType typeForTypeAnnotations,
+            @Nullable DeclarationDescriptorWithVisibility parameterContainer,
+            @NotNull List<Class<?>> additionalAnnotations
+    ) {
         if (annotated == null) return;
 
         Set<String> annotationDescriptorsAlreadyPresent = new HashSet<>();
@@ -139,22 +149,28 @@ public abstract class AnnotationCodegen {
             }
         }
 
-        generateAdditionalAnnotations(annotated, returnType, annotationDescriptorsAlreadyPresent);
+        for (Class<?> annotation : additionalAnnotations) {
+            String descriptor = generateAnnotationIfNotPresent(annotationDescriptorsAlreadyPresent, annotation);
+            annotationDescriptorsAlreadyPresent.add(descriptor);
+        }
+
+        generateAdditionalAnnotations(annotated, returnType, annotationDescriptorsAlreadyPresent, parameterContainer);
         generateTypeAnnotations(annotated, typeForTypeAnnotations);
     }
 
     private void generateAdditionalAnnotations(
             @NotNull Annotated annotated,
             @Nullable Type returnType,
-            @NotNull Set<String> annotationDescriptorsAlreadyPresent
+            @NotNull Set<String> annotationDescriptorsAlreadyPresent,
+            @Nullable DeclarationDescriptorWithVisibility parameterContainer
     ) {
         if (annotated instanceof CallableDescriptor) {
-            generateAdditionalCallableAnnotations((CallableDescriptor) annotated, returnType, annotationDescriptorsAlreadyPresent);
+            generateAdditionalCallableAnnotations((CallableDescriptor) annotated, returnType, annotationDescriptorsAlreadyPresent, parameterContainer);
         }
         else if (annotated instanceof FieldDescriptor) {
             generateAdditionalCallableAnnotations(
-                    ((FieldDescriptor) annotated).getCorrespondingProperty(), returnType, annotationDescriptorsAlreadyPresent
-            );
+                    ((FieldDescriptor) annotated).getCorrespondingProperty(), returnType, annotationDescriptorsAlreadyPresent,
+                    parameterContainer);
         }
         else if (annotated instanceof ClassDescriptor) {
             generateAdditionalClassAnnotations(annotationDescriptorsAlreadyPresent, (ClassDescriptor) annotated);
@@ -164,11 +180,15 @@ public abstract class AnnotationCodegen {
     private void generateAdditionalCallableAnnotations(
             @NotNull CallableDescriptor descriptor,
             @Nullable Type returnType,
-            @NotNull Set<String> annotationDescriptorsAlreadyPresent
+            @NotNull Set<String> annotationDescriptorsAlreadyPresent,
+            @Nullable DeclarationDescriptorWithVisibility parameterContainer
     ) {
         // No need to annotate privates, synthetic accessors and their parameters
         if (isInvisibleFromTheOutside(descriptor)) return;
-        if (descriptor instanceof ValueParameterDescriptor && isInvisibleFromTheOutside(descriptor.getContainingDeclaration())) return;
+        if (descriptor instanceof ParameterDescriptor &&
+            isInvisibleFromTheOutside(parameterContainer != null ? parameterContainer : descriptor.getContainingDeclaration())) {
+            return;
+        }
 
         // No need to annotate annotation methods since they're always non-null
         if (descriptor instanceof PropertyGetterDescriptor &&
@@ -176,7 +196,9 @@ public abstract class AnnotationCodegen {
             return;
         }
 
-        if (returnType != null && !AsmUtil.isPrimitive(returnType)) {
+        if (returnType != null && !AsmUtil.isPrimitive(returnType) &&
+            !(descriptor instanceof PropertyDescriptor && ((PropertyDescriptor) descriptor).isDelegated())
+        ) {
             generateNullabilityAnnotation(descriptor.getReturnType(), annotationDescriptorsAlreadyPresent);
         }
     }
@@ -254,12 +276,11 @@ public abstract class AnnotationCodegen {
         jvm8.put(KotlinTarget.TYPE, ElementType.TYPE_USE);
 
         annotationTargetMaps.put(JvmTarget.JVM_1_6, jvm6);
-        annotationTargetMaps.put(JvmTarget.JVM_1_8, jvm8);
-        annotationTargetMaps.put(JvmTarget.JVM_9, jvm8);
-        annotationTargetMaps.put(JvmTarget.JVM_10, jvm8);
-        annotationTargetMaps.put(JvmTarget.JVM_11, jvm8);
-        annotationTargetMaps.put(JvmTarget.JVM_12, jvm8);
-        annotationTargetMaps.put(JvmTarget.JVM_13, jvm8);
+        for (JvmTarget target : JvmTarget.values()) {
+            if (target != JvmTarget.JVM_1_6) {
+                annotationTargetMaps.put(target, jvm8);
+            }
+        }
     }
 
     private void generateTargetAnnotation(
@@ -313,11 +334,13 @@ public abstract class AnnotationCodegen {
         visitor.visitEnd();
     }
 
-    private void generateAnnotationIfNotPresent(Set<String> annotationDescriptorsAlreadyPresent, Class<?> annotationClass) {
+    @NotNull
+    private String generateAnnotationIfNotPresent(Set<String> annotationDescriptorsAlreadyPresent, Class<?> annotationClass) {
         String descriptor = Type.getType(annotationClass).getDescriptor();
         if (!annotationDescriptorsAlreadyPresent.contains(descriptor)) {
             visitAnnotation(descriptor, false).visitEnd();
         }
+        return descriptor;
     }
 
     private static boolean isBareTypeParameterWithNullableUpperBound(@NotNull KotlinType type) {
@@ -434,8 +457,13 @@ public abstract class AnnotationCodegen {
 
             @Override
             public Void visitEnumValue(EnumValue value, Void data) {
-                String enumClassInternalName = AsmUtil.asmTypeByClassId(value.getEnumClassId()).getDescriptor();
+                ClassId enumClassId = value.getEnumClassId();
+                String enumClassInternalName = AsmUtil.asmTypeByClassId(enumClassId).getDescriptor();
                 String enumEntryName = value.getEnumEntryName().asString();
+                ClassDescriptor descriptor = FindClassInModuleKt.findClassAcrossModuleDependencies(state.getModule(), enumClassId);
+                if (descriptor != null) {
+                    innerClassConsumer.addInnerClassInfoFromAnnotation(descriptor);
+                }
                 annotationVisitor.visitEnum(name, enumClassInternalName, enumEntryName);
                 return null;
             }
@@ -452,8 +480,9 @@ public abstract class AnnotationCodegen {
 
             @Override
             public Void visitAnnotationValue(AnnotationValue value, Void data) {
-                String internalAnnName = typeMapper.mapType(value.getValue().getType()).getDescriptor();
-                AnnotationVisitor visitor = annotationVisitor.visitAnnotation(name, internalAnnName);
+                KotlinType classType = value.getValue().getType();
+                innerClassConsumer.addInnerClassInfoFromAnnotation(DescriptorUtils.getClassDescriptorForType(classType));
+                AnnotationVisitor visitor = annotationVisitor.visitAnnotation(name, typeMapper.mapType(classType).getDescriptor());
                 genAnnotationArguments(value.getValue(), visitor);
                 visitor.visitEnd();
                 return null;
@@ -461,7 +490,9 @@ public abstract class AnnotationCodegen {
 
             @Override
             public Void visitKClassValue(KClassValue value, Void data) {
-                annotationVisitor.visit(name, typeMapper.mapType(value.getArgumentType(module)));
+                KotlinType classType = value.getArgumentType(module);
+                innerClassConsumer.addInnerClassInfoFromAnnotation(DescriptorUtils.getClassDescriptorForType(classType));
+                annotationVisitor.visit(name, typeMapper.mapType(classType));
                 return null;
             }
 

@@ -16,15 +16,20 @@
 
 package org.jetbrains.kotlin.ir.declarations.impl
 
+import org.jetbrains.kotlin.descriptors.ModuleDescriptor
 import org.jetbrains.kotlin.descriptors.PackageFragmentDescriptor
+import org.jetbrains.kotlin.descriptors.impl.EmptyPackageFragmentDescriptor
+import org.jetbrains.kotlin.ir.ObsoleteDescriptorBasedAPI
 import org.jetbrains.kotlin.ir.IrElementBase
 import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.declarations.IrDeclaration
 import org.jetbrains.kotlin.ir.declarations.IrExternalPackageFragment
 import org.jetbrains.kotlin.ir.symbols.IrExternalPackageFragmentSymbol
+import org.jetbrains.kotlin.ir.symbols.impl.IrExternalPackageFragmentSymbolImpl
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformer
 import org.jetbrains.kotlin.ir.visitors.IrElementVisitor
 import org.jetbrains.kotlin.name.FqName
+import org.jetbrains.kotlin.serialization.deserialization.descriptors.DeserializedMemberDescriptor
 
 class IrExternalPackageFragmentImpl(
     override val symbol: IrExternalPackageFragmentSymbol,
@@ -32,15 +37,17 @@ class IrExternalPackageFragmentImpl(
 ) : IrElementBase(UNDEFINED_OFFSET, UNDEFINED_OFFSET),
     IrExternalPackageFragment {
 
-    constructor(symbol: IrExternalPackageFragmentSymbol) : this(symbol, symbol.descriptor.fqName)
-
     init {
         symbol.bind(this)
     }
 
+    @ObsoleteDescriptorBasedAPI
     override val packageFragmentDescriptor: PackageFragmentDescriptor get() = symbol.descriptor
 
     override val declarations: MutableList<IrDeclaration> = ArrayList()
+
+    @OptIn(ObsoleteDescriptorBasedAPI::class)
+    override val containerSource get() = (symbol.descriptor as? DeserializedMemberDescriptor)?.containerSource
 
     override fun <R, D> accept(visitor: IrElementVisitor<R, D>, data: D): R =
         visitor.visitExternalPackageFragment(this, data)
@@ -53,5 +60,15 @@ class IrExternalPackageFragmentImpl(
         declarations.forEachIndexed { i, irDeclaration ->
             declarations[i] = irDeclaration.transform(transformer, data) as IrDeclaration
         }
+    }
+
+    companion object {
+        fun createEmptyExternalPackageFragment(
+            module: ModuleDescriptor,
+            fqName: FqName
+        ): IrExternalPackageFragmentImpl =
+            IrExternalPackageFragmentImpl(
+                IrExternalPackageFragmentSymbolImpl(EmptyPackageFragmentDescriptor(module, fqName)), fqName
+            )
     }
 }

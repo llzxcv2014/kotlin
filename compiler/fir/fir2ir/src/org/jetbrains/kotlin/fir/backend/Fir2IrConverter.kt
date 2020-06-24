@@ -7,16 +7,24 @@ package org.jetbrains.kotlin.fir.backend
 
 import org.jetbrains.kotlin.config.LanguageVersionSettings
 import org.jetbrains.kotlin.fir.FirSession
+import org.jetbrains.kotlin.fir.backend.generators.AnnotationGenerator
+import org.jetbrains.kotlin.fir.backend.generators.CallAndReferenceGenerator
+import org.jetbrains.kotlin.fir.backend.generators.FakeOverrideGenerator
 import org.jetbrains.kotlin.fir.declarations.*
 import org.jetbrains.kotlin.fir.descriptors.FirModuleDescriptor
 import org.jetbrains.kotlin.fir.psi
+import org.jetbrains.kotlin.fir.resolve.ScopeSession
+import org.jetbrains.kotlin.fir.signaturer.FirMangler
+import org.jetbrains.kotlin.fir.symbols.FirBuiltinSymbols
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.declarations.impl.IrFileImpl
 import org.jetbrains.kotlin.ir.declarations.impl.IrModuleFragmentImpl
 import org.jetbrains.kotlin.ir.descriptors.IrBuiltIns
+import org.jetbrains.kotlin.ir.descriptors.WrappedDeclarationDescriptor
 import org.jetbrains.kotlin.ir.util.*
 import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.psi2ir.PsiSourceManager
+import org.jetbrains.kotlin.psi2ir.generators.GeneratorExtensions
 
 class Fir2IrConverter(
     private val moduleDescriptor: FirModuleDescriptor,
@@ -56,8 +64,9 @@ class Fir2IrConverter(
 
     fun processClassHeaders(file: FirFile) {
         file.declarations.forEach {
-            if (it is FirRegularClass) {
-                processClassAndNestedClassHeaders(it)
+            when (it) {
+                is FirRegularClass -> processClassAndNestedClassHeaders(it)
+                is FirTypeAlias -> classifierStorage.registerTypeAlias(it, declarationStorage.getIrFile(file))
             }
         }
     }
@@ -156,22 +165,32 @@ class Fir2IrConverter(
     companion object {
         fun createModuleFragment(
             session: FirSession,
+            scopeSession: ScopeSession,
             firFiles: List<FirFile>,
             languageVersionSettings: LanguageVersionSettings,
             fakeOverrideMode: FakeOverrideMode = FakeOverrideMode.NORMAL,
-            signaturer: IdSignatureComposer
+            signaturer: IdSignatureComposer,
+            generatorExtensions: GeneratorExtensions,
+            mangler: FirMangler
         ): Fir2IrResult {
             val moduleDescriptor = FirModuleDescriptor(session)
             val symbolTable = SymbolTable(signaturer)
             val constantValueGenerator = ConstantValueGenerator(moduleDescriptor, symbolTable)
-            val typeTranslator = TypeTranslator(symbolTable, languageVersionSettings, moduleDescriptor.builtIns)
+            val typeTranslator = TypeTranslator(
+                symbolTable,
+                languageVersionSettings,
+                moduleDescriptor.builtIns,
+                extensions = generatorExtensions
+            )
             constantValueGenerator.typeTranslator = typeTranslator
             typeTranslator.constantValueGenerator = constantValueGenerator
-            val builtIns = IrBuiltIns(moduleDescriptor.builtIns, typeTranslator, signaturer, symbolTable)
+            val builtIns = IrBuiltIns(moduleDescriptor.builtIns, typeTranslator, symbolTable)
+            FirBuiltinSymbols(builtIns, moduleDescriptor.builtIns, symbolTable)
             val sourceManager = PsiSourceManager()
-            val components = Fir2IrComponentsStorage(session, symbolTable, builtIns)
-            val declarationStorage = Fir2IrDeclarationStorage(components, moduleDescriptor)
+            val components = Fir2IrComponentsStorage(session, scopeSession, symbolTable, builtIns, mangler)
+            val conversionScope = Fir2IrConversionScope()
             val classifierStorage = Fir2IrClassifierStorage(components)
+            val declarationStorage = Fir2IrDeclarationStorage(components, moduleDescriptor)
             val typeConverter = Fir2IrTypeConverter(components)
             components.declarationStorage = declarationStorage
             components.classifierStorage = classifierStorage
@@ -183,8 +202,12 @@ class Fir2IrConverter(
                 irFiles += converter.registerFileAndClasses(firFile)
             }
             val irModuleFragment = IrModuleFragmentImpl(moduleDescriptor, builtIns, irFiles)
+            val irProviders =
+                generateTypicalIrProviderList(irModuleFragment.descriptor, builtIns, symbolTable, extensions = generatorExtensions)
             val externalDependenciesGenerator = ExternalDependenciesGenerator(
-                symbolTable, generateTypicalIrProviderList(irModuleFragment.descriptor, builtIns, symbolTable)
+                symbolTable,
+                irProviders,
+                languageVersionSettings
             )
             // Necessary call to generate built-in IR classes
             externalDependenciesGenerator.generateUnboundSymbolsAsDependencies()
@@ -192,11 +215,18 @@ class Fir2IrConverter(
             for (firFile in firFiles) {
                 converter.processClassHeaders(firFile)
             }
+            val fakeOverrideGenerator = FakeOverrideGenerator(
+                session, scopeSession, classifierStorage, declarationStorage, conversionScope, fakeOverrideMode
+            )
+            components.fakeOverrideGenerator = fakeOverrideGenerator
             for (firFile in firFiles) {
                 converter.processFileAndClassMembers(firFile)
             }
 
-            val fir2irVisitor = Fir2IrVisitor(converter, components, fakeOverrideMode)
+            val fir2irVisitor = Fir2IrVisitor(converter, components, conversionScope)
+            val callGenerator = CallAndReferenceGenerator(components, fir2irVisitor, conversionScope)
+            components.callGenerator = callGenerator
+            declarationStorage.annotationGenerator = AnnotationGenerator(components)
             for (firFile in firFiles) {
                 val irFile = firFile.accept(fir2irVisitor, null) as IrFile
                 val fileEntry = sourceManager.getOrCreateFileEntry(firFile.psi as KtFile)
@@ -204,7 +234,13 @@ class Fir2IrConverter(
             }
 
             externalDependenciesGenerator.generateUnboundSymbolsAsDependencies()
-            return Fir2IrResult(irModuleFragment, symbolTable, sourceManager)
+            val stubGenerator = irProviders.filterIsInstance<DeclarationStubGenerator>().first()
+            for (descriptor in symbolTable.wrappedTopLevelCallableDescriptors()) {
+                val parentClass = stubGenerator.generateOrGetFacadeClass(descriptor as WrappedDeclarationDescriptor<*>)
+                descriptor.owner.parent = parentClass ?: continue
+            }
+
+            return Fir2IrResult(irModuleFragment, symbolTable, sourceManager, components)
         }
     }
 }

@@ -5,6 +5,7 @@
 
 package org.jetbrains.kotlin.fir.resolve.inference
 
+import org.jetbrains.kotlin.builtins.functions.FunctionClassDescriptor
 import org.jetbrains.kotlin.fir.FirSession
 import org.jetbrains.kotlin.fir.declarations.FirAnonymousFunction
 import org.jetbrains.kotlin.fir.resolve.BodyResolveComponents
@@ -15,7 +16,12 @@ import org.jetbrains.kotlin.fir.types.*
 
 fun ConeKotlinType.isBuiltinFunctionalType(session: FirSession): Boolean {
     return when (this) {
-        is ConeClassLikeType -> fullyExpandedType(session).lookupTag.classId.asString().startsWith("kotlin/Function")
+        is ConeClassLikeType -> {
+            val classId = fullyExpandedType(session).lookupTag.classId
+            val kind =
+                FunctionClassDescriptor.Kind.byClassNamePrefix(classId.packageFqName, classId.relativeClassName.asString()) ?: return false
+            kind == FunctionClassDescriptor.Kind.Function || kind == FunctionClassDescriptor.Kind.SuspendFunction
+        }
         else -> false
     }
 }
@@ -24,14 +30,16 @@ fun ConeKotlinType.isSuspendFunctionType(session: FirSession): Boolean {
     return when (val type = this) {
         is ConeClassLikeType -> {
             val classId = type.fullyExpandedType(session).lookupTag.classId
-            classId.packageFqName.asString() == "kotlin" && classId.relativeClassName.asString().startsWith("SuspendFunction")
+            val kind =
+                FunctionClassDescriptor.Kind.byClassNamePrefix(classId.packageFqName, classId.relativeClassName.asString()) ?: return false
+            kind == FunctionClassDescriptor.Kind.SuspendFunction
         }
         else -> false
     }
 }
 
-fun ConeKotlinType.receiverType(expectedTypeRef: FirTypeRef, session: FirSession): ConeKotlinType? {
-    if (isBuiltinFunctionalType(session) && expectedTypeRef.isExtensionFunctionType(session)) {
+fun ConeKotlinType.receiverType(expectedTypeRef: FirTypeRef?, session: FirSession): ConeKotlinType? {
+    if (isBuiltinFunctionalType(session) && expectedTypeRef?.isExtensionFunctionType(session) == true) {
         return ((this as ConeClassLikeType).fullyExpandedType(session).typeArguments.first() as ConeKotlinTypeProjection).type
     }
     return null
@@ -55,7 +63,7 @@ val FirAnonymousFunction.receiverType get() = receiverTypeRef?.coneTypeSafe<Cone
 
 fun extractLambdaInfoFromFunctionalType(
     expectedType: ConeKotlinType?,
-    expectedTypeRef: FirTypeRef,
+    expectedTypeRef: FirTypeRef?,
     argument: FirAnonymousFunction,
     returnTypeVariable: ConeTypeVariableForLambdaReturnType?,
     components: BodyResolveComponents,
@@ -70,7 +78,7 @@ fun extractLambdaInfoFromFunctionalType(
 
     val receiverType = argument.receiverType ?: expectedType.receiverType(expectedTypeRef, session)
     val returnType = argument.returnType ?: expectedType.returnType(session) ?: return null
-    val parameters = extractLambdaParameters(expectedType, argument, expectedTypeRef.isExtensionFunctionType(session), session)
+    val parameters = extractLambdaParameters(expectedType, argument, expectedTypeRef?.isExtensionFunctionType(session) ?: false, session)
 
     return ResolvedLambdaAtom(
         argument,

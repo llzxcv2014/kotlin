@@ -17,8 +17,11 @@ import org.jetbrains.kotlin.idea.caches.resolve.analyzeWithContent
 import org.jetbrains.kotlin.idea.highlighter.hasSuspendCalls
 import org.jetbrains.kotlin.idea.project.languageVersionSettings
 import org.jetbrains.kotlin.idea.quickfix.RemoveModifierFix
+import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtNameReferenceExpression
+import org.jetbrains.kotlin.psi.KtNamedFunction
 import org.jetbrains.kotlin.psi.namedFunctionVisitor
 import org.jetbrains.kotlin.psi.psiUtil.anyDescendantOfType
 import org.jetbrains.kotlin.resolve.BindingContext
@@ -30,15 +33,13 @@ class RedundantSuspendModifierInspection : AbstractKotlinInspection() {
 
             val suspendModifier = function.modifierList?.getModifier(KtTokens.SUSPEND_KEYWORD) ?: return
             if (!function.hasBody()) return
-            if (function.hasModifier(KtTokens.OVERRIDE_KEYWORD)) return
+            if (function.hasModifier(KtTokens.OVERRIDE_KEYWORD) || function.hasModifier(KtTokens.ACTUAL_KEYWORD)) return
 
             val context = function.analyzeWithContent()
             val descriptor = context[BindingContext.FUNCTION, function] ?: return
             if (descriptor.modality == Modality.OPEN) return
 
-            if (function.anyDescendantOfType<KtExpression> { it.hasSuspendCalls(context) }) {
-                return
-            }
+            if (function.hasSuspendCalls(context)) return
 
             holder.registerProblem(
                 suspendModifier,
@@ -50,5 +51,14 @@ class RedundantSuspendModifierInspection : AbstractKotlinInspection() {
                 )
             )
         })
+    }
+
+    private fun KtNamedFunction.hasSuspendCalls(context: BindingContext): Boolean {
+        return anyDescendantOfType<KtExpression> {
+            if (it is KtNameReferenceExpression && it.getReferencedName() == this.name && it.mainReference.resolve() == this) {
+                return@anyDescendantOfType false
+            }
+            it.hasSuspendCalls(context)
+        }
     }
 }

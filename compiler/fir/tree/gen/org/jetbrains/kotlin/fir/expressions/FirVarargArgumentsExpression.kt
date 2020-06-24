@@ -22,4 +22,8 @@ abstract class FirVarargArgumentsExpression : FirExpression() {
     abstract val varargElementType: FirTypeRef
 
     override fun <R, D> accept(visitor: FirVisitor<R, D>, data: D): R = visitor.visitVarargArgumentsExpression(this, data)
+
+    abstract override fun replaceTypeRef(newTypeRef: FirTypeRef)
+
+    abstract override fun <D> transformAnnotations(transformer: FirTransformer<D>, data: D): FirVarargArgumentsExpression
 }

@@ -46,6 +46,7 @@ import org.jetbrains.kotlin.resolve.jvm.diagnostics.JvmDeclarationOriginKind.*
 import org.jetbrains.kotlin.serialization.deserialization.DeserializationConfiguration
 import org.jetbrains.kotlin.storage.LockBasedStorageManager
 import org.jetbrains.kotlin.types.KotlinType
+import org.jetbrains.kotlin.types.TypeApproximator
 import org.jetbrains.org.objectweb.asm.Type
 import org.jetbrains.org.objectweb.asm.commons.Method
 import java.io.File
@@ -216,11 +217,17 @@ class GenerationState private constructor(
                 !configuration.getBoolean(JVMConfigurationKeys.NO_EXCEPTION_ON_EXPLICIT_EQUALS_FOR_BOXED_NULL)
         IntrinsicMethods(target, canReplaceStdlibRuntimeApiBehavior, shouldUseConsistentEquals)
     }
+    val generateOptimizedCallableReferenceSuperClasses =
+        languageVersionSettings.apiVersion >= ApiVersion.KOTLIN_1_4 &&
+                !configuration.getBoolean(JVMConfigurationKeys.NO_OPTIMIZED_CALLABLE_REFERENCES)
+    val useKotlinNothingValueException =
+        languageVersionSettings.apiVersion >= ApiVersion.KOTLIN_1_4 &&
+                !configuration.getBoolean(JVMConfigurationKeys.NO_KOTLIN_NOTHING_VALUE_EXCEPTION)
     val samWrapperClasses: SamWrapperClasses = SamWrapperClasses(this)
     val globalInlineContext: GlobalInlineContext = GlobalInlineContext(diagnostics)
     val mappingsClassesForWhenByEnum: MappingsClassesForWhenByEnum = MappingsClassesForWhenByEnum(this)
     val jvmRuntimeTypes: JvmRuntimeTypes = JvmRuntimeTypes(
-        module, configuration.languageVersionSettings, configuration.getBoolean(JVMConfigurationKeys.NO_OPTIMIZED_CALLABLE_REFERENCES)
+        module, configuration.languageVersionSettings, generateOptimizedCallableReferenceSuperClasses
     )
     val factory: ClassFileFactory
     private var duplicateSignatureFactory: BuilderFactoryForDuplicateSignatureDiagnostics? = null
@@ -245,6 +252,8 @@ class GenerationState private constructor(
     val isInlineDisabled: Boolean = configuration.getBoolean(CommonConfigurationKeys.DISABLE_INLINE)
     val useTypeTableInSerializer: Boolean = configuration.getBoolean(JVMConfigurationKeys.USE_TYPE_TABLE)
     val unifiedNullChecks: Boolean = languageVersionSettings.apiVersion >= ApiVersion.KOTLIN_1_4
+    val functionsWithInlineClassReturnTypesMangled: Boolean =
+        languageVersionSettings.supportsFeature(LanguageFeature.MangleClassMembersReturningInlineClasses)
 
     val rootContext: CodegenContext<*> = RootContext(this)
 
@@ -276,6 +285,12 @@ class GenerationState private constructor(
     val globalSerializationBindings = JvmSerializationBindings()
     lateinit var irBasedMapAsmMethod: (FunctionDescriptor) -> Method
     var mapInlineClass: (ClassDescriptor) -> Type = { descriptor -> typeMapper.mapType(descriptor.defaultType) }
+
+    val typeApproximator: TypeApproximator? =
+        if (languageVersionSettings.supportsFeature(LanguageFeature.NewInference))
+            TypeApproximator(module.builtIns)
+        else
+            null
 
     init {
         this.interceptedBuilderFactory = builderFactory

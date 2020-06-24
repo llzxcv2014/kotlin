@@ -7,10 +7,7 @@ package org.jetbrains.kotlin.resolve.calls.tower
 
 import org.jetbrains.kotlin.builtins.KotlinBuiltIns
 import org.jetbrains.kotlin.builtins.createFunctionType
-import org.jetbrains.kotlin.descriptors.CallableDescriptor
-import org.jetbrains.kotlin.descriptors.FunctionDescriptor
-import org.jetbrains.kotlin.descriptors.ModuleDescriptor
-import org.jetbrains.kotlin.descriptors.PropertyDescriptor
+import org.jetbrains.kotlin.descriptors.*
 import org.jetbrains.kotlin.descriptors.impl.FunctionDescriptorImpl
 import org.jetbrains.kotlin.descriptors.impl.ReceiverParameterDescriptorImpl
 import org.jetbrains.kotlin.psi.KtElement
@@ -25,6 +22,7 @@ import org.jetbrains.kotlin.resolve.calls.ArgumentTypeResolver
 import org.jetbrains.kotlin.resolve.calls.NewCommonSuperTypeCalculator
 import org.jetbrains.kotlin.resolve.calls.checkers.CallCheckerContext
 import org.jetbrains.kotlin.resolve.calls.components.CallableReferenceAdaptation
+import org.jetbrains.kotlin.resolve.calls.components.SuspendConversionStrategy
 import org.jetbrains.kotlin.resolve.calls.components.isVararg
 import org.jetbrains.kotlin.resolve.calls.context.BasicCallResolutionContext
 import org.jetbrains.kotlin.resolve.calls.context.ContextDependency
@@ -38,9 +36,10 @@ import org.jetbrains.kotlin.resolve.calls.tasks.TracingStrategyImpl
 import org.jetbrains.kotlin.resolve.calls.util.CallMaker
 import org.jetbrains.kotlin.resolve.checkers.MissingDependencySupertypeChecker
 import org.jetbrains.kotlin.resolve.deprecation.DeprecationResolver
-import org.jetbrains.kotlin.resolve.scopes.receivers.TransientReceiver
 import org.jetbrains.kotlin.resolve.scopes.receivers.ReceiverValue
+import org.jetbrains.kotlin.resolve.scopes.receivers.TransientReceiver
 import org.jetbrains.kotlin.types.*
+import org.jetbrains.kotlin.types.expressions.CoercionStrategy
 import org.jetbrains.kotlin.types.expressions.DoubleColonExpressionResolver
 import org.jetbrains.kotlin.types.expressions.ExpressionTypingServices
 import org.jetbrains.kotlin.types.expressions.typeInfoFactory.createTypeInfo
@@ -78,7 +77,6 @@ class ResolvedAtomCompleter(
             is ResolvedLambdaAtom -> completeLambda(resolvedAtom)
             is ResolvedCallAtom -> completeResolvedCall(resolvedAtom, emptyList())
             is ResolvedSubCallArgument -> completeSubCallArgument(resolvedAtom)
-            is PartialCallResolutionResult -> completeResolvedCall(resolvedAtom.resultCallAtom, resolvedAtom.diagnostics)
         }
     }
 
@@ -103,20 +101,24 @@ class ResolvedAtomCompleter(
     }
 
     fun completeResolvedCall(resolvedCallAtom: ResolvedCallAtom, diagnostics: Collection<KotlinCallDiagnostic>): ResolvedCall<*>? {
+        val diagnosticsFromPartiallyResolvedCall = extractDiagnosticsFromPartiallyResolvedCall(resolvedCallAtom)
+
         clearPartiallyResolvedCall(resolvedCallAtom)
 
         if (resolvedCallAtom.atom.psiKotlinCall is PSIKotlinCallForVariable) return null
+
+        val allDiagnostics = diagnostics + diagnosticsFromPartiallyResolvedCall
 
         val resolvedCall = kotlinToResolvedCallTransformer.transformToResolvedCall<CallableDescriptor>(
             resolvedCallAtom,
             topLevelTrace,
             resultSubstitutor,
-            diagnostics
+            allDiagnostics
         )
 
         val lastCall = if (resolvedCall is VariableAsFunctionResolvedCall) resolvedCall.functionCall else resolvedCall
         if (ErrorUtils.isError(resolvedCall.candidateDescriptor)) {
-            kotlinToResolvedCallTransformer.runArgumentsChecks(topLevelCallContext, topLevelTrace, lastCall as NewResolvedCallImpl<*>)
+            kotlinToResolvedCallTransformer.runArgumentsChecks(topLevelCallContext, lastCall as NewResolvedCallImpl<*>)
             checkMissingReceiverSupertypes(resolvedCall, missingSupertypesResolver, topLevelTrace)
             return resolvedCall
         }
@@ -136,11 +138,11 @@ class ResolvedAtomCompleter(
 
         kotlinToResolvedCallTransformer.bind(topLevelTrace, resolvedCall)
 
-        kotlinToResolvedCallTransformer.runArgumentsChecks(topLevelCallContext, topLevelTrace, lastCall as NewResolvedCallImpl<*>)
+        kotlinToResolvedCallTransformer.runArgumentsChecks(topLevelCallContext, lastCall as NewResolvedCallImpl<*>)
         kotlinToResolvedCallTransformer.runCallCheckers(resolvedCall, callCheckerContext)
         kotlinToResolvedCallTransformer.runAdditionalReceiversCheckers(resolvedCall, topLevelCallContext)
 
-        kotlinToResolvedCallTransformer.reportDiagnostics(topLevelCallContext, topLevelTrace, resolvedCall, diagnostics)
+        kotlinToResolvedCallTransformer.reportDiagnostics(topLevelCallContext, topLevelTrace, resolvedCall, allDiagnostics)
 
         return resolvedCall
     }
@@ -161,6 +163,13 @@ class ResolvedAtomCompleter(
         }
     }
 
+    private fun extractDiagnosticsFromPartiallyResolvedCall(resolvedCallAtom: ResolvedCallAtom): Set<KotlinCallDiagnostic> {
+        val psiCall = KotlinToResolvedCallTransformer.keyForPartiallyResolvedCall(resolvedCallAtom)
+        val partialCallContainer = topLevelTrace[BindingContext.ONLY_RESOLVED_CALL, psiCall]
+
+        return partialCallContainer?.result?.diagnostics.orEmpty().toSet()
+    }
+
     private fun clearPartiallyResolvedCall(resolvedCallAtom: ResolvedCallAtom) {
         val psiCall = KotlinToResolvedCallTransformer.keyForPartiallyResolvedCall(resolvedCallAtom)
 
@@ -172,6 +181,8 @@ class ResolvedAtomCompleter(
 
     private val ResolvedLambdaAtom.isCoercedToUnit: Boolean
         get() {
+            val resultArgumentsInfo = this.resultArgumentsInfo
+                ?: return (subResolvedAtoms!!.single() as ResolvedLambdaAtom).isCoercedToUnit
             val returnTypes =
                 resultArgumentsInfo.nonErrorArguments.map {
                     val type = it.safeAs<SimpleKotlinCallArgument>()?.receiver?.receiverValue?.type ?: return@map null
@@ -190,6 +201,8 @@ class ResolvedAtomCompleter(
         }
 
     private fun completeLambda(lambda: ResolvedLambdaAtom) {
+        val lambda = lambda.unwrap()
+        val resultArgumentsInfo = lambda.resultArgumentsInfo!!
         val returnType = if (lambda.isCoercedToUnit) {
             builtIns.unitType
         } else {
@@ -204,11 +217,11 @@ class ResolvedAtomCompleter(
             )
         updateTraceForLambda(lambda, topLevelTrace, approximatedReturnType)
 
-        for (lambdaResult in lambda.resultArgumentsInfo.nonErrorArguments) {
+        for (lambdaResult in resultArgumentsInfo.nonErrorArguments) {
             val resultValueArgument = lambdaResult as? PSIKotlinCallArgument ?: continue
             val newContext =
                 topLevelCallContext.replaceDataFlowInfo(resultValueArgument.dataFlowInfoAfterThisArgument)
-                    .replaceExpectedType(returnType)
+                    .replaceExpectedType(approximatedReturnType)
                     .replaceBindingTrace(topLevelTrace)
 
             val argumentExpression = resultValueArgument.valueArgument.getArgumentExpression() ?: continue
@@ -396,7 +409,6 @@ class ResolvedAtomCompleter(
         callableReferenceAdaptation: CallableReferenceAdaptation?
     ) {
         if (callableReferenceAdaptation == null) return
-
         val callElement = resolvedCall.call.callElement
         val isUnboundReference = resolvedCall.dispatchReceiver is TransientReceiver
 
@@ -409,32 +421,60 @@ class ResolvedAtomCompleter(
             )
         }
 
+        // We should record argument mapping only if callable reference requires adaptation:
+        // - argument mapping is non-trivial: any of the arguments were mapped as defaults or vararg elements;
+        // - result should be coerced.
+        var hasNonTrivialMapping = false
+        val mappedArguments = ArrayList<Pair<ValueParameterDescriptor, ResolvedValueArgument>>()
         for ((valueParameter, resolvedCallArgument) in callableReferenceAdaptation.mappedArguments) {
-            resolvedCall.recordValueArgument(
-                valueParameter,
-                when (resolvedCallArgument) {
-                    ResolvedCallArgument.DefaultArgument ->
-                        DefaultValueArgument.DEFAULT
-                    is ResolvedCallArgument.SimpleArgument -> {
-                        val valueArgument = makeFakeValueArgument(resolvedCallArgument.callArgument)
-                        if (valueParameter.isVararg)
-                            VarargValueArgument(
-                                listOf(
-                                    FakeImplicitSpreadValueArgumentForCallableReferenceImpl(callElement, valueArgument)
-                                )
-                            )
-                        else
-                            ExpressionValueArgument(valueArgument)
-                    }
-                    is ResolvedCallArgument.VarargArgument ->
-                        VarargValueArgument(
-                            resolvedCallArgument.arguments.map {
-                                makeFakeValueArgument(it)
-                            }
-                        )
+            val resolvedValueArgument = when (resolvedCallArgument) {
+                ResolvedCallArgument.DefaultArgument -> {
+                    hasNonTrivialMapping = true
+                    DefaultValueArgument.DEFAULT
                 }
-            )
+                is ResolvedCallArgument.SimpleArgument -> {
+                    val valueArgument = makeFakeValueArgument(resolvedCallArgument.callArgument)
+                    if (valueParameter.isVararg)
+                        VarargValueArgument(
+                            listOf(
+                                FakeImplicitSpreadValueArgumentForCallableReferenceImpl(callElement, valueArgument)
+                            )
+                        )
+                    else
+                        ExpressionValueArgument(valueArgument)
+                }
+                is ResolvedCallArgument.VarargArgument -> {
+                    hasNonTrivialMapping = true
+                    VarargValueArgument(
+                        resolvedCallArgument.arguments.map {
+                            makeFakeValueArgument(it)
+                        }
+                    )
+                }
+            }
+            mappedArguments.add(valueParameter to resolvedValueArgument)
         }
+        if (hasNonTrivialMapping || isCallableReferenceWithImplicitConversion(resolvedCall, callableReferenceAdaptation)) {
+            for ((valueParameter, resolvedValueArgument) in mappedArguments) {
+                resolvedCall.recordValueArgument(valueParameter, resolvedValueArgument)
+            }
+        }
+    }
+
+    private fun isCallableReferenceWithImplicitConversion(
+        resolvedCall: ResolvedCall<CallableDescriptor>,
+        callableReferenceAdaptation: CallableReferenceAdaptation
+    ): Boolean {
+        val resultingDescriptor = resolvedCall.resultingDescriptor
+
+        // TODO drop return type check - see noCoercionToUnitIfFunctionAlreadyReturnsUnit.kt
+        if (callableReferenceAdaptation.coercionStrategy == CoercionStrategy.COERCION_TO_UNIT && !resultingDescriptor.returnType!!.isUnit())
+            return true
+
+        if (callableReferenceAdaptation.suspendConversionStrategy == SuspendConversionStrategy.SUSPEND_CONVERSION)
+            return true
+
+        return false
     }
 
     private fun completeCollectionLiteralCalls(collectionLiteralArgument: ResolvedCollectionLiteralAtom) {

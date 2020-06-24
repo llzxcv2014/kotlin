@@ -24,7 +24,6 @@ internal class FirQualifiedAccessExpressionImpl(
     override val source: FirSourceElement?,
     override var typeRef: FirTypeRef,
     override val annotations: MutableList<FirAnnotationCall>,
-    override var safe: Boolean,
     override val typeArguments: MutableList<FirTypeProjection>,
     override var explicitReceiver: FirExpression?,
     override var dispatchReceiver: FirExpression,
@@ -47,7 +46,7 @@ internal class FirQualifiedAccessExpressionImpl(
 
     override fun <D> transformChildren(transformer: FirTransformer<D>, data: D): FirQualifiedAccessExpressionImpl {
         typeRef = typeRef.transformSingle(transformer, data)
-        annotations.transformInplace(transformer, data)
+        transformAnnotations(transformer, data)
         transformTypeArguments(transformer, data)
         explicitReceiver = explicitReceiver?.transformSingle(transformer, data)
         if (dispatchReceiver !== explicitReceiver) {
@@ -57,6 +56,11 @@ internal class FirQualifiedAccessExpressionImpl(
             extensionReceiver = extensionReceiver.transformSingle(transformer, data)
         }
         transformCalleeReference(transformer, data)
+        return this
+    }
+
+    override fun <D> transformAnnotations(transformer: FirTransformer<D>, data: D): FirQualifiedAccessExpressionImpl {
+        annotations.transformInplace(transformer, data)
         return this
     }
 
@@ -92,5 +96,9 @@ internal class FirQualifiedAccessExpressionImpl(
     override fun replaceTypeArguments(newTypeArguments: List<FirTypeProjection>) {
         typeArguments.clear()
         typeArguments.addAll(newTypeArguments)
+    }
+
+    override fun replaceCalleeReference(newCalleeReference: FirReference) {
+        calleeReference = newCalleeReference
     }
 }

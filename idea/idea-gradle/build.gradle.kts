@@ -8,18 +8,15 @@ dependencies {
 
     compileOnly(project(":idea"))
     compileOnly(project(":idea:idea-jvm"))
-    compileOnly(project(":idea:idea-native")) { isTransitive = false }
+    compileOnly(project(":idea:idea-native"))
     compile(project(":idea:kotlin-gradle-tooling"))
-    Platform[193].orLower {
-        compile(project(":idea:idea-gradle-tooling-api"))
-    }
 
     compile(project(":compiler:frontend"))
     compile(project(":compiler:frontend.java"))
 
     compile(project(":js:js.frontend"))
 
-    compile(project(":native:kotlin-native-utils")) { isTransitive = false }
+    compile(project(":native:frontend.native"))
 
     compileOnly(intellijDep())
     compileOnly(intellijPluginDep("gradle"))
@@ -51,9 +48,9 @@ dependencies {
 
     testCompile(project(":idea:idea-native")) { isTransitive = false }
     testCompile(project(":idea:idea-gradle-native")) { isTransitive = false }
-    testRuntime(project(":native:frontend.native")) { isTransitive = false }
-    testRuntime(project(":native:kotlin-native-utils")) { isTransitive = false }
-    testRuntime(project(":idea:idea-new-project-wizard"))
+    if (Ide.IJ()) {
+        testRuntime(project(":idea:idea-new-project-wizard"))
+    }
 
     testRuntimeOnly(toolsJar())
     testRuntime(project(":kotlin-reflect"))
@@ -88,6 +85,10 @@ dependencies {
     testRuntime(intellijPluginDep("android"))
     testRuntime(intellijPluginDep("smali"))
 
+    if (Ide.AS41.orHigher()) {
+         testRuntime(intellijPluginDep("platform-images"))
+    }
+
     if (Ide.AS36.orHigher()) {
         testRuntime(intellijPluginDep("android-layoutlib"))
     }
@@ -121,3 +122,9 @@ projectTest(parallel = false) {
 }
 
 configureFormInstrumentation()
+
+if (Ide.AS41.orHigher()) {
+    getOrCreateTask<Test>("test") {
+        setExcludes(listOf("**"))
+    }
+}

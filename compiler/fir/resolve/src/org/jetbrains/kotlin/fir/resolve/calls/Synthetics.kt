@@ -6,11 +6,14 @@
 package org.jetbrains.kotlin.fir.resolve.calls
 
 import org.jetbrains.kotlin.fir.FirSession
+import org.jetbrains.kotlin.fir.declarations.FirDeclarationOrigin
 import org.jetbrains.kotlin.fir.declarations.FirSimpleFunction
 import org.jetbrains.kotlin.fir.declarations.isStatic
-import org.jetbrains.kotlin.fir.declarations.synthetic.FirSyntheticProperty
 import org.jetbrains.kotlin.fir.declarations.synthetic.buildSyntheticProperty
 import org.jetbrains.kotlin.fir.scopes.FirScope
+import org.jetbrains.kotlin.fir.scopes.FirTypeScope
+import org.jetbrains.kotlin.fir.scopes.ProcessorAction
+import org.jetbrains.kotlin.fir.scopes.processOverriddenFunctionsAndSelf
 import org.jetbrains.kotlin.fir.symbols.CallableId
 import org.jetbrains.kotlin.fir.symbols.StandardClassIds
 import org.jetbrains.kotlin.fir.symbols.SyntheticSymbol
@@ -33,10 +36,8 @@ class FirSyntheticFunctionSymbol(
 
 class FirSyntheticPropertiesScope(
     val session: FirSession,
-    private val baseScope: FirScope
+    private val baseScope: FirTypeScope
 ) : FirScope() {
-
-    val synthetic: MutableMap<FirCallableSymbol<*>, FirVariableSymbol<*>> = mutableMapOf()
 
     private fun checkGetAndCreateSynthetic(
         propertyName: Name,
@@ -51,6 +52,8 @@ class FirSyntheticPropertiesScope(
         if (getter.isStatic) return
         val getterReturnType = (getter.returnTypeRef as? FirResolvedTypeRef)?.type
         if ((getterReturnType as? ConeClassLikeType)?.lookupTag?.classId == StandardClassIds.Unit) return
+
+        if (!getterSymbol.hasJavaOverridden()) return
 
         var matchingSetter: FirSimpleFunction? = null
         if (getterReturnType != null) {
@@ -77,6 +80,20 @@ class FirSyntheticPropertiesScope(
             delegateSetter = matchingSetter
         }
         processor(property.symbol)
+    }
+
+    private fun FirFunctionSymbol<*>.hasJavaOverridden(): Boolean {
+        var result = false
+        baseScope.processOverriddenFunctionsAndSelf(this) {
+            if (it.unwrapSubstitutionOverrides().fir.origin == FirDeclarationOrigin.Enhancement) {
+                result = true
+                ProcessorAction.STOP
+            } else {
+                ProcessorAction.NEXT
+            }
+        }
+
+        return result
     }
 
     override fun processPropertiesByName(name: Name, processor: (FirVariableSymbol<*>) -> Unit) {
@@ -118,4 +135,3 @@ class FirSyntheticPropertiesScope(
         private const val IS_PREFIX = "is"
     }
 }
-

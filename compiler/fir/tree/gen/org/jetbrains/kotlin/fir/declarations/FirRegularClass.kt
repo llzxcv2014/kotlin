@@ -10,6 +10,7 @@ import org.jetbrains.kotlin.fir.FirPureAbstractElement
 import org.jetbrains.kotlin.fir.FirSession
 import org.jetbrains.kotlin.fir.FirSourceElement
 import org.jetbrains.kotlin.fir.expressions.FirAnnotationCall
+import org.jetbrains.kotlin.fir.references.FirControlFlowGraphReference
 import org.jetbrains.kotlin.fir.scopes.FirScopeProvider
 import org.jetbrains.kotlin.fir.symbols.impl.FirRegularClassSymbol
 import org.jetbrains.kotlin.fir.types.FirTypeRef
@@ -21,13 +22,16 @@ import org.jetbrains.kotlin.fir.visitors.*
  * DO NOT MODIFY IT MANUALLY
  */
 
-abstract class FirRegularClass : FirPureAbstractElement(), FirMemberDeclaration, FirTypeParametersOwner, FirClass<FirRegularClass> {
+abstract class FirRegularClass : FirPureAbstractElement(), FirMemberDeclaration, FirTypeParameterRefsOwner, FirControlFlowGraphOwner, FirClass<FirRegularClass> {
     abstract override val source: FirSourceElement?
     abstract override val session: FirSession
     abstract override val resolvePhase: FirResolvePhase
+    abstract override val origin: FirDeclarationOrigin
+    abstract override val attributes: FirDeclarationAttributes
     abstract override val annotations: List<FirAnnotationCall>
-    abstract override val typeParameters: List<FirTypeParameter>
+    abstract override val typeParameters: List<FirTypeParameterRef>
     abstract override val status: FirDeclarationStatus
+    abstract override val controlFlowGraphReference: FirControlFlowGraphReference
     abstract override val classKind: ClassKind
     abstract override val declarations: List<FirDeclaration>
     abstract override val scopeProvider: FirScopeProvider
@@ -39,7 +43,19 @@ abstract class FirRegularClass : FirPureAbstractElement(), FirMemberDeclaration,
 
     override fun <R, D> accept(visitor: FirVisitor<R, D>, data: D): R = visitor.visitRegularClass(this, data)
 
+    abstract override fun replaceResolvePhase(newResolvePhase: FirResolvePhase)
+
     abstract override fun replaceSuperTypeRefs(newSuperTypeRefs: List<FirTypeRef>)
 
+    abstract override fun <D> transformAnnotations(transformer: FirTransformer<D>, data: D): FirRegularClass
+
     abstract override fun <D> transformStatus(transformer: FirTransformer<D>, data: D): FirRegularClass
+
+    abstract override fun <D> transformControlFlowGraphReference(transformer: FirTransformer<D>, data: D): FirRegularClass
+
+    abstract override fun <D> transformDeclarations(transformer: FirTransformer<D>, data: D): FirRegularClass
+
+    abstract fun <D> transformCompanionObject(transformer: FirTransformer<D>, data: D): FirRegularClass
+
+    abstract override fun <D> transformSuperTypeRefs(transformer: FirTransformer<D>, data: D): FirRegularClass
 }

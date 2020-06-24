@@ -194,6 +194,41 @@ public class MoveStatementTestGenerated extends AbstractMoveStatementTest {
             public void testClassWithoutBody4() throws Exception {
                 runTest("idea/testData/codeInsight/moveUpDown/classBodyDeclarations/class/classWithoutBody4.kt");
             }
+
+            @TestMetadata("kt-14946-1.kt")
+            public void testKt_14946_1() throws Exception {
+                runTest("idea/testData/codeInsight/moveUpDown/classBodyDeclarations/class/kt-14946-1.kt");
+            }
+
+            @TestMetadata("kt-14946-2.kt")
+            public void testKt_14946_2() throws Exception {
+                runTest("idea/testData/codeInsight/moveUpDown/classBodyDeclarations/class/kt-14946-2.kt");
+            }
+
+            @TestMetadata("kt-14946-3.kt")
+            public void testKt_14946_3() throws Exception {
+                runTest("idea/testData/codeInsight/moveUpDown/classBodyDeclarations/class/kt-14946-3.kt");
+            }
+
+            @TestMetadata("kt-14946-4.kt")
+            public void testKt_14946_4() throws Exception {
+                runTest("idea/testData/codeInsight/moveUpDown/classBodyDeclarations/class/kt-14946-4.kt");
+            }
+
+            @TestMetadata("kt-14946-5.kt")
+            public void testKt_14946_5() throws Exception {
+                runTest("idea/testData/codeInsight/moveUpDown/classBodyDeclarations/class/kt-14946-5.kt");
+            }
+
+            @TestMetadata("kt-14946-6.kt")
+            public void testKt_14946_6() throws Exception {
+                runTest("idea/testData/codeInsight/moveUpDown/classBodyDeclarations/class/kt-14946-6.kt");
+            }
+
+            @TestMetadata("kt-14946-7.kt")
+            public void testKt_14946_7() throws Exception {
+                runTest("idea/testData/codeInsight/moveUpDown/classBodyDeclarations/class/kt-14946-7.kt");
+            }
         }
 
         @TestMetadata("idea/testData/codeInsight/moveUpDown/classBodyDeclarations/classInitializer")
@@ -1063,6 +1098,76 @@ public class MoveStatementTestGenerated extends AbstractMoveStatementTest {
             runTest("idea/testData/codeInsight/moveUpDown/expressions/lambda3.kt");
         }
 
+        @TestMetadata("lambdaInDoWhile.kt")
+        public void testLambdaInDoWhile() throws Exception {
+            runTest("idea/testData/codeInsight/moveUpDown/expressions/lambdaInDoWhile.kt");
+        }
+
+        @TestMetadata("lambdaInDoWhile2.kt")
+        public void testLambdaInDoWhile2() throws Exception {
+            runTest("idea/testData/codeInsight/moveUpDown/expressions/lambdaInDoWhile2.kt");
+        }
+
+        @TestMetadata("lambdaInFor.kt")
+        public void testLambdaInFor() throws Exception {
+            runTest("idea/testData/codeInsight/moveUpDown/expressions/lambdaInFor.kt");
+        }
+
+        @TestMetadata("lambdaInFor2.kt")
+        public void testLambdaInFor2() throws Exception {
+            runTest("idea/testData/codeInsight/moveUpDown/expressions/lambdaInFor2.kt");
+        }
+
+        @TestMetadata("lambdaInIf.kt")
+        public void testLambdaInIf() throws Exception {
+            runTest("idea/testData/codeInsight/moveUpDown/expressions/lambdaInIf.kt");
+        }
+
+        @TestMetadata("lambdaInIf2.kt")
+        public void testLambdaInIf2() throws Exception {
+            runTest("idea/testData/codeInsight/moveUpDown/expressions/lambdaInIf2.kt");
+        }
+
+        @TestMetadata("lambdaInQualifiedExpression.kt")
+        public void testLambdaInQualifiedExpression() throws Exception {
+            runTest("idea/testData/codeInsight/moveUpDown/expressions/lambdaInQualifiedExpression.kt");
+        }
+
+        @TestMetadata("lambdaInTry.kt")
+        public void testLambdaInTry() throws Exception {
+            runTest("idea/testData/codeInsight/moveUpDown/expressions/lambdaInTry.kt");
+        }
+
+        @TestMetadata("lambdaInTry2.kt")
+        public void testLambdaInTry2() throws Exception {
+            runTest("idea/testData/codeInsight/moveUpDown/expressions/lambdaInTry2.kt");
+        }
+
+        @TestMetadata("lambdaInTry3.kt")
+        public void testLambdaInTry3() throws Exception {
+            runTest("idea/testData/codeInsight/moveUpDown/expressions/lambdaInTry3.kt");
+        }
+
+        @TestMetadata("lambdaInWhen.kt")
+        public void testLambdaInWhen() throws Exception {
+            runTest("idea/testData/codeInsight/moveUpDown/expressions/lambdaInWhen.kt");
+        }
+
+        @TestMetadata("lambdaInWhen2.kt")
+        public void testLambdaInWhen2() throws Exception {
+            runTest("idea/testData/codeInsight/moveUpDown/expressions/lambdaInWhen2.kt");
+        }
+
+        @TestMetadata("lambdaInWhile.kt")
+        public void testLambdaInWhile() throws Exception {
+            runTest("idea/testData/codeInsight/moveUpDown/expressions/lambdaInWhile.kt");
+        }
+
+        @TestMetadata("lambdaInWhile2.kt")
+        public void testLambdaInWhile2() throws Exception {
+            runTest("idea/testData/codeInsight/moveUpDown/expressions/lambdaInWhile2.kt");
+        }
+
         @TestMetadata("multilineComment1.kt")
         public void testMultilineComment1() throws Exception {
             runTest("idea/testData/codeInsight/moveUpDown/expressions/multilineComment1.kt");
@@ -1331,6 +1436,11 @@ public class MoveStatementTestGenerated extends AbstractMoveStatementTest {
             runTest("idea/testData/codeInsight/moveUpDown/parametersAndArguments/funParams1.kt");
         }
 
+        @TestMetadata("funParams10.kt")
+        public void testFunParams10() throws Exception {
+            runTest("idea/testData/codeInsight/moveUpDown/parametersAndArguments/funParams10.kt");
+        }
+
         @TestMetadata("funParams2.kt")
         public void testFunParams2() throws Exception {
             runTest("idea/testData/codeInsight/moveUpDown/parametersAndArguments/funParams2.kt");
@@ -1364,6 +1474,11 @@ public class MoveStatementTestGenerated extends AbstractMoveStatementTest {
         @TestMetadata("funParams8.kt")
         public void testFunParams8() throws Exception {
             runTest("idea/testData/codeInsight/moveUpDown/parametersAndArguments/funParams8.kt");
+        }
+
+        @TestMetadata("funParams9.kt")
+        public void testFunParams9() throws Exception {
+            runTest("idea/testData/codeInsight/moveUpDown/parametersAndArguments/funParams9.kt");
         }
     }
 

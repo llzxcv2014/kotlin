@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2019 JetBrains s.r.o. and Kotlin Programming Language contributors.
+ * Copyright 2010-2020 JetBrains s.r.o. and Kotlin Programming Language contributors.
  * Use of this source code is governed by the Apache 2.0 license that can be found in the license/LICENSE.txt file.
  */
 
@@ -22,7 +22,6 @@ import com.intellij.refactoring.move.moveClassesOrPackages.MoveClassHandler
 import com.intellij.refactoring.rename.RenameUtil
 import com.intellij.refactoring.util.NonCodeUsageInfo
 import com.intellij.refactoring.util.RefactoringUIUtil
-import com.intellij.refactoring.util.TextOccurrencesUtil
 import com.intellij.usageView.UsageInfo
 import com.intellij.usageView.UsageViewBundle
 import com.intellij.usageView.UsageViewDescriptor
@@ -31,12 +30,14 @@ import com.intellij.util.IncorrectOperationException
 import com.intellij.util.containers.MultiMap
 import gnu.trove.THashMap
 import gnu.trove.TObjectHashingStrategy
+import org.jetbrains.kotlin.asJava.classes.KtLightClassForFacade
 import org.jetbrains.kotlin.asJava.elements.KtLightDeclaration
 import org.jetbrains.kotlin.asJava.findFacadeClass
 import org.jetbrains.kotlin.asJava.namedUnwrappedElement
 import org.jetbrains.kotlin.asJava.toLightElements
 import org.jetbrains.kotlin.idea.KotlinBundle
 import org.jetbrains.kotlin.idea.codeInsight.shorten.addToBeShortenedDescendantsToWaitingSet
+import org.jetbrains.kotlin.idea.codeInsight.shorten.performDelayedRefactoringRequests
 import org.jetbrains.kotlin.idea.core.deleteSingle
 import org.jetbrains.kotlin.idea.core.quoteIfNeeded
 import org.jetbrains.kotlin.idea.refactoring.broadcastRefactoringExit
@@ -55,6 +56,9 @@ import org.jetbrains.kotlin.psi.psiUtil.isAncestor
 import org.jetbrains.kotlin.utils.ifEmpty
 import org.jetbrains.kotlin.utils.keysToMap
 import java.util.*
+import kotlin.collections.ArrayList
+import kotlin.math.max
+import kotlin.math.min
 
 interface Mover : (KtNamedDeclaration, KtElement) -> KtNamedDeclaration {
     object Default : Mover {
@@ -195,6 +199,13 @@ class MoveKotlinDeclarationsProcessor(
             return null
         }
 
+        fun UsageInfo.intersectsWith(usage: UsageInfo): Boolean {
+            if (element?.containingFile != usage.element?.containingFile) return false
+            val firstSegment = segment ?: return false
+            val secondSegment = usage.segment ?: return false
+            return max(firstSegment.startOffset, secondSegment.startOffset) <= min(firstSegment.endOffset, secondSegment.endOffset)
+        }
+
         fun collectUsages(kotlinToLightElements: Map<KtNamedDeclaration, List<PsiNamedElement>>, result: MutableCollection<UsageInfo>) {
             kotlinToLightElements.values.flatten().flatMapTo(result) { lightElement ->
                 val searchScope = getSearchScope(lightElement) ?: return@flatMapTo emptyList()
@@ -212,18 +223,46 @@ class MoveKotlinDeclarationsProcessor(
 
                 val name = lightElement.getKotlinFqName()?.quoteIfNeeded()?.asString()
                 if (name != null) {
-                    TextOccurrencesUtil.findNonCodeUsages(
-                        lightElement,
-                        name,
-                        descriptor.searchInCommentsAndStrings,
-                        descriptor.searchInNonCode,
-                        FqName(newFqName).quoteIfNeeded().asString(),
-                        results
-                    )
+                    fun searchForKotlinNameUsages(results: ArrayList<UsageInfo>) {
+                        BunchedDeprecation.findNonCodeUsages(
+                            lightElement,
+                            name,
+                            descriptor.searchInCommentsAndStrings,
+                            descriptor.searchInNonCode,
+                            FqName(newFqName).quoteIfNeeded().asString(),
+                            results
+                        )
+                    }
+
+                    val facadeContainer = lightElement.parent as? KtLightClassForFacade
+                    if (facadeContainer != null) {
+                        val oldFqNameWithFacade = StringUtil.getQualifiedName(facadeContainer.qualifiedName, elementName)
+                        val newFqNameWithFacade = StringUtil.getQualifiedName(
+                            StringUtil.getQualifiedName(newContainerName, facadeContainer.name),
+                            elementName
+                        )
+
+                        BunchedDeprecation.findNonCodeUsages(
+                            lightElement,
+                            oldFqNameWithFacade,
+                            descriptor.searchInCommentsAndStrings,
+                            descriptor.searchInNonCode,
+                            FqName(newFqNameWithFacade).quoteIfNeeded().asString(),
+                            results
+                        )
+
+                        ArrayList<UsageInfo>().also { searchForKotlinNameUsages(it) }.forEach { kotlinNonCodeUsage ->
+                            if (results.none { it.intersectsWith(kotlinNonCodeUsage) }) {
+                                results.add(kotlinNonCodeUsage)
+                            }
+                        }
+                    } else {
+                        searchForKotlinNameUsages(results)
+                    }
                 }
 
-                MoveClassHandler.EP_NAME.extensions.forEach { handler ->
-                    if (handler !is MoveKotlinClassHandler) handler.preprocessUsages(results)
+                MoveClassHandler.EP_NAME.extensions.filter { it !is MoveKotlinClassHandler }.forEach { handler ->
+                    handler.preprocessUsages(results)
                 }
 
                 results
@@ -325,7 +364,7 @@ class MoveKotlinDeclarationsProcessor(
                     }
                 }
 
-                if (descriptor.deleteSourceFiles) {
+                if (descriptor.deleteSourceFiles && sourceFile.declarations.isEmpty()) {
                     sourceFile.delete()
                 }
             }
@@ -338,8 +377,8 @@ class MoveKotlinDeclarationsProcessor(
             internalUsageScopes.forEach { newInternalUsages += restoreInternalUsages(it, oldToNewElementsMapping) }
 
             usagesToProcess += newInternalUsages
-
             nonCodeUsages = postProcessMoveUsages(usagesToProcess, oldToNewElementsMapping).toTypedArray()
+            performDelayedRefactoringRequests(project)
         } catch (e: IncorrectOperationException) {
             nonCodeUsages = null
             RefactoringUIUtil.processIncorrectOperation(myProject, e)

@@ -8,6 +8,7 @@ package org.jetbrains.kotlin.fir.expressions.impl
 import org.jetbrains.kotlin.descriptors.annotations.AnnotationUseSiteTarget
 import org.jetbrains.kotlin.fir.FirSourceElement
 import org.jetbrains.kotlin.fir.expressions.FirAnnotationCall
+import org.jetbrains.kotlin.fir.expressions.FirAnnotationResolveStatus
 import org.jetbrains.kotlin.fir.expressions.FirArgumentList
 import org.jetbrains.kotlin.fir.types.FirTypeRef
 import org.jetbrains.kotlin.fir.visitors.*
@@ -23,6 +24,7 @@ internal class FirAnnotationCallImpl(
     override var argumentList: FirArgumentList,
     override val useSiteTarget: AnnotationUseSiteTarget?,
     override var annotationTypeRef: FirTypeRef,
+    override var resolveStatus: FirAnnotationResolveStatus,
 ) : FirAnnotationCall() {
     override val typeRef: FirTypeRef get() = annotationTypeRef
 
@@ -33,8 +35,18 @@ internal class FirAnnotationCallImpl(
     }
 
     override fun <D> transformChildren(transformer: FirTransformer<D>, data: D): FirAnnotationCallImpl {
-        annotations.transformInplace(transformer, data)
+        transformAnnotations(transformer, data)
         argumentList = argumentList.transformSingle(transformer, data)
+        transformAnnotationTypeRef(transformer, data)
+        return this
+    }
+
+    override fun <D> transformAnnotations(transformer: FirTransformer<D>, data: D): FirAnnotationCallImpl {
+        annotations.transformInplace(transformer, data)
+        return this
+    }
+
+    override fun <D> transformAnnotationTypeRef(transformer: FirTransformer<D>, data: D): FirAnnotationCallImpl {
         annotationTypeRef = annotationTypeRef.transformSingle(transformer, data)
         return this
     }
@@ -43,5 +55,9 @@ internal class FirAnnotationCallImpl(
 
     override fun replaceArgumentList(newArgumentList: FirArgumentList) {
         argumentList = newArgumentList
+    }
+
+    override fun replaceResolveStatus(newResolveStatus: FirAnnotationResolveStatus) {
+        resolveStatus = newResolveStatus
     }
 }

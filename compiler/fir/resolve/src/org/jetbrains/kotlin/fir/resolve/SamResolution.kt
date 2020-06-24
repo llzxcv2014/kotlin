@@ -120,14 +120,16 @@ class FirSamResolverImpl(
         )
 
         val newTypeParameters = firRegularClass.typeParameters.map { typeParameter ->
+            val declaredTypeParameter = typeParameter.symbol.fir // TODO: or really declared?
             FirTypeParameterBuilder().apply {
-                source = typeParameter.source
+                source = declaredTypeParameter.source
                 session = firSession
-                name = typeParameter.name
+                origin = FirDeclarationOrigin.SamConstructor
+                name = declaredTypeParameter.name
                 this.symbol = FirTypeParameterSymbol()
                 variance = Variance.INVARIANT
                 isReified = false
-                annotations += typeParameter.annotations
+                annotations += declaredTypeParameter.annotations
             }
         }
 
@@ -142,7 +144,8 @@ class FirSamResolverImpl(
         )
 
         for ((newTypeParameter, oldTypeParameter) in newTypeParameters.zip(firRegularClass.typeParameters)) {
-            newTypeParameter.bounds += oldTypeParameter.bounds.mapNotNull { typeRef ->
+            val declared = oldTypeParameter.symbol.fir // TODO: or really declared?
+            newTypeParameter.bounds += declared.bounds.mapNotNull { typeRef ->
                 buildResolvedTypeRef {
                     source = typeRef.source
                     type = substitutor.substituteOrSelf(typeRef.coneTypeSafe() ?: return@mapNotNull null)
@@ -153,6 +156,7 @@ class FirSamResolverImpl(
         return buildSimpleFunction {
             session = firSession
             name = classId.shortClassName
+            origin = FirDeclarationOrigin.SamConstructor
             status = FirDeclarationStatusImpl(firRegularClass.visibility, Modality.FINAL).apply {
                 isExpect = firRegularClass.isExpect
                 isActual = firRegularClass.isActual
@@ -180,6 +184,7 @@ class FirSamResolverImpl(
 
             valueParameters += buildValueParameter {
                 session = firSession
+                origin = FirDeclarationOrigin.SamConstructor
                 returnTypeRef = buildResolvedTypeRef {
                     source = firRegularClass.source
                     type = substitutedFunctionType
@@ -311,7 +316,7 @@ private fun FirRegularClass.hasMoreThenOneAbstractFunctionOrHasAbstractProperty(
 // "methods that are members of I that do not have the same signature as any public instance method of the class Object"
 // It means that if an interface declares `int hashCode()` then the method won't be taken into account when
 // checking if the interface is SAM.
-private fun FirSimpleFunction.isPublicInObject(checkOnlyName: Boolean): Boolean {
+fun FirSimpleFunction.isPublicInObject(checkOnlyName: Boolean): Boolean {
     if (name.asString() !in PUBLIC_METHOD_NAMES_IN_OBJECT) return false
     if (checkOnlyName) return true
 
@@ -353,5 +358,6 @@ private fun FirSimpleFunction.getFunctionTypeForAbstractMethod(): ConeLookupTagB
     return createFunctionalType(
         parameterTypes, receiverType = null,
         rawReturnType = returnTypeRef.coneTypeSafe() ?: ConeKotlinErrorType("No type for return type of $this"),
+        isSuspend = this.isSuspend
     )
 }

@@ -40,6 +40,7 @@ enum class CallKind(vararg resolutionSequence: ResolutionStage) {
         CheckVisibility,
         MapArguments,
         CheckExplicitReceiverConsistency,
+        MapTypeArguments,
         CreateFreshTypeVariableSubstitutorStage,
         CheckReceivers.Dispatch,
         CheckReceivers.Extension,
@@ -51,6 +52,8 @@ enum class CallKind(vararg resolutionSequence: ResolutionStage) {
         DiscriminateSynthetics,
         NoTypeArguments,
         CreateFreshTypeVariableSubstitutorStage,
+        CheckReceivers.Dispatch,
+        CheckReceivers.Extension,
         CheckCallableReferenceExpectedType
     ),
     SyntheticIdForCallableReferencesResolution(

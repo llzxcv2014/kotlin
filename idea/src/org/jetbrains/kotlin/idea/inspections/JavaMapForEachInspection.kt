@@ -31,6 +31,7 @@ class JavaMapForEachInspection : AbstractApplicabilityBasedInspection<KtDotQuali
         val callExpression = element.callExpression ?: return false
         val calleeExpression = callExpression.calleeExpression ?: return false
         if (calleeExpression.text != "forEach") return false
+        if (callExpression.valueArguments.size != 1) return false
 
         val lambda = callExpression.lambda() ?: return false
         val lambdaParameters = lambda.valueParameters
@@ -47,7 +48,7 @@ class JavaMapForEachInspection : AbstractApplicabilityBasedInspection<KtDotQuali
     override fun inspectionText(element: KtDotQualifiedExpression) =
         KotlinBundle.message("java.map.foreach.method.call.should.be.replaced.with.kotlin.s.foreach")
 
-    override val defaultFixText = KotlinBundle.message("replace.with.kotlin.s.foreach")
+    override val defaultFixText get() = KotlinBundle.message("replace.with.kotlin.s.foreach")
 
     override fun applyTo(element: KtDotQualifiedExpression, project: Project, editor: Editor?) {
         val call = element.callExpression ?: return

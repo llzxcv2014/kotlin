@@ -17,6 +17,7 @@
 package org.jetbrains.kotlin.ir.declarations.impl
 
 import org.jetbrains.kotlin.descriptors.TypeParameterDescriptor
+import org.jetbrains.kotlin.ir.ObsoleteDescriptorBasedAPI
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationOrigin
 import org.jetbrains.kotlin.ir.declarations.IrTypeParameter
 import org.jetbrains.kotlin.ir.declarations.impl.carriers.TypeParameterCarrier
@@ -43,43 +44,24 @@ class IrTypeParameterImpl(
     IrTypeParameter,
     TypeParameterCarrier {
 
-    constructor(
-        startOffset: Int,
-        endOffset: Int,
-        origin: IrDeclarationOrigin,
-        symbol: IrTypeParameterSymbol
-    ) :
-            this(
-                startOffset, endOffset, origin, symbol,
-                symbol.descriptor.name,
-                symbol.descriptor.index,
-                symbol.descriptor.isReified,
-                symbol.descriptor.variance
-            )
-
-    constructor(
-        startOffset: Int,
-        endOffset: Int,
-        origin: IrDeclarationOrigin,
-        symbol: IrTypeParameterSymbol,
-        name: Name,
-        index: Int,
-        variance: Variance
-    ) : this(startOffset, endOffset, origin, symbol, name, index, symbol.descriptor.isReified, variance)
-
     @Deprecated("Use constructor which takes symbol instead of descriptor")
     constructor(
         startOffset: Int,
         endOffset: Int,
         origin: IrDeclarationOrigin,
-        descriptor: TypeParameterDescriptor
-    ) :
-            this(startOffset, endOffset, origin, IrTypeParameterSymbolImpl(descriptor))
+        descriptor: TypeParameterDescriptor,
+        name: Name = descriptor.name,
+        symbol: IrTypeParameterSymbol = IrTypeParameterSymbolImpl(descriptor)
+    ) : this(
+        startOffset, endOffset, origin, symbol, name,
+        index = descriptor.index, isReified = descriptor.isReified, variance = descriptor.variance
+    )
 
     init {
         symbol.bind(this)
     }
 
+    @ObsoleteDescriptorBasedAPI
     override val descriptor: TypeParameterDescriptor get() = symbol.descriptor
 
     override val superTypes: MutableList<IrType> = SmartList()

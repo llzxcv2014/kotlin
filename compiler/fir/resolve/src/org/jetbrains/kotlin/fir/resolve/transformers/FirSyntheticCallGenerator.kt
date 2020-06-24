@@ -22,7 +22,7 @@ import org.jetbrains.kotlin.fir.references.builder.buildErrorNamedReference
 import org.jetbrains.kotlin.fir.references.impl.FirStubReference
 import org.jetbrains.kotlin.fir.resolve.BodyResolveComponents
 import org.jetbrains.kotlin.fir.resolve.calls.*
-import org.jetbrains.kotlin.fir.resolve.diagnostics.FirUnresolvedNameError
+import org.jetbrains.kotlin.fir.resolve.diagnostics.ConeUnresolvedNameError
 import org.jetbrains.kotlin.fir.resolve.transformers.body.resolve.FirAbstractBodyResolveTransformer
 import org.jetbrains.kotlin.fir.symbols.CallableId
 import org.jetbrains.kotlin.fir.symbols.SyntheticCallableId
@@ -114,7 +114,7 @@ class FirSyntheticCallGenerator(
                 StoreCalleeReference,
                 buildErrorNamedReference {
                     source = callableReferenceAccess.source
-                    diagnostic = FirUnresolvedNameError(callableReferenceAccess.calleeReference.name)
+                    diagnostic = ConeUnresolvedNameError(callableReferenceAccess.calleeReference.name)
                 }
             )
         val fakeCallElement = buildFunctionCall {
@@ -153,12 +153,11 @@ class FirSyntheticCallGenerator(
         name = name,
         explicitReceiver = null,
         argumentList = argumentList,
-        isSafeCall = false,
         isPotentialQualifierPart = false,
         typeArguments = emptyList(),
         session = session,
         containingFile = file,
-        implicitReceiverStack = implicitReceiverStack
+        containingDeclarations = containingDeclarations
     )
 
     private fun generateSyntheticSelectTypeParameter(): Pair<FirTypeParameter, FirResolvedTypeRef> {
@@ -166,6 +165,7 @@ class FirSyntheticCallGenerator(
         val typeParameter =
             buildTypeParameter {
                 session = this@FirSyntheticCallGenerator.session
+                origin = FirDeclarationOrigin.Library
                 name = Name.identifier("K")
                 symbol = typeParameterSymbol
                 variance = Variance.INVARIANT
@@ -185,7 +185,7 @@ class FirSyntheticCallGenerator(
 
         val (typeParameter, returnType) = generateSyntheticSelectTypeParameter()
 
-        val argumentType = buildResolvedTypeRef { type = returnType.coneTypeUnsafe<ConeKotlinType>().createArrayOf(session) }
+        val argumentType = buildResolvedTypeRef { type = returnType.coneTypeUnsafe<ConeKotlinType>().createArrayOf() }
         val typeArgument = buildTypeProjectionWithVariance {
             typeRef = returnType
             variance = Variance.INVARIANT
@@ -230,6 +230,7 @@ class FirSyntheticCallGenerator(
     ): FirSimpleFunctionBuilder {
         return FirSimpleFunctionBuilder().apply {
             session = this@FirSyntheticCallGenerator.session
+            origin = FirDeclarationOrigin.Synthetic
             this.symbol = symbol
             this.name = name
             status = FirDeclarationStatusImpl(Visibilities.PUBLIC, Modality.FINAL).apply {
@@ -254,6 +255,7 @@ class FirSyntheticCallGenerator(
         val name = Name.identifier(nameAsString)
         return buildValueParameter {
             session = this@FirSyntheticCallGenerator.session
+            origin = FirDeclarationOrigin.Library
             this.name = name
             returnTypeRef = this@toValueParameter
             isCrossinline = false

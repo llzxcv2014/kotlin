@@ -69,8 +69,16 @@ abstract class AbstractConeCallConflictResolver(
             val byte = StandardClassIds.Byte
             val short = StandardClassIds.Short
 
+            val uInt = StandardClassIds.UInt
+            val uLong = StandardClassIds.ULong
+            val uByte = StandardClassIds.UByte
+            val uShort = StandardClassIds.UShort
+
             val specificClassId = specific.classId ?: return false
             val generalClassId = general.classId ?: return false
+
+
+            // int >= long, int >= short, short >= byte
 
             when {
                 //TypeUtils.equalTypes(specific, _double) && TypeUtils.equalTypes(general, _float) -> return true
@@ -82,6 +90,14 @@ abstract class AbstractConeCallConflictResolver(
                     }
                 }
                 specificClassId == short && generalClassId == byte -> return true
+                specificClassId == uInt -> {
+                    when {
+                        generalClassId == uLong -> return true
+                        generalClassId == uByte -> return true
+                        generalClassId == uShort -> return true
+                    }
+                }
+                specificClassId == uShort && generalClassId == uByte -> return true
             }
             return false
         }
@@ -147,9 +163,9 @@ abstract class AbstractConeCallConflictResolver(
         call: Candidate,
         function: FirFunction<*>
     ): List<ConeKotlinType> {
-        return (call.resultingTypeForCallableReference?.typeArguments?.map { it as ConeKotlinType }
-            ?: (listOfNotNull(function.receiverTypeRef?.coneTypeUnsafe()) +
-                    call.argumentMapping?.map { it.value.argumentType() }.orEmpty()))
+        return listOfNotNull(function.receiverTypeRef?.coneTypeUnsafe()) +
+                (call.resultingTypeForCallableReference?.typeArguments?.map { it as ConeKotlinType }
+                    ?: call.argumentMapping?.map { it.value.argumentType() }.orEmpty())
     }
 
     private fun createFlatSignature(call: Candidate, klass: FirClass<*>): FlatSignature<Candidate> {

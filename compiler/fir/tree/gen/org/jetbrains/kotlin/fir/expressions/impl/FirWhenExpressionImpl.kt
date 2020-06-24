@@ -34,8 +34,9 @@ internal class FirWhenExpressionImpl(
         typeRef.accept(visitor, data)
         annotations.forEach { it.accept(visitor, data) }
         calleeReference.accept(visitor, data)
-        if (subjectVariable != null) {
-            subjectVariable.accept(visitor, data)
+        val subjectVariable_ = subjectVariable
+        if (subjectVariable_ != null) {
+            subjectVariable_.accept(visitor, data)
         } else {
             subject?.accept(visitor, data)
         }
@@ -47,6 +48,11 @@ internal class FirWhenExpressionImpl(
         transformSubject(transformer, data)
         transformBranches(transformer, data)
         transformOtherChildren(transformer, data)
+        return this
+    }
+
+    override fun <D> transformAnnotations(transformer: FirTransformer<D>, data: D): FirWhenExpressionImpl {
+        annotations.transformInplace(transformer, data)
         return this
     }
 
@@ -72,12 +78,16 @@ internal class FirWhenExpressionImpl(
 
     override fun <D> transformOtherChildren(transformer: FirTransformer<D>, data: D): FirWhenExpressionImpl {
         typeRef = typeRef.transformSingle(transformer, data)
-        annotations.transformInplace(transformer, data)
+        transformAnnotations(transformer, data)
         return this
     }
 
     override fun replaceTypeRef(newTypeRef: FirTypeRef) {
         typeRef = newTypeRef
+    }
+
+    override fun replaceCalleeReference(newCalleeReference: FirReference) {
+        calleeReference = newCalleeReference
     }
 
     override fun replaceIsExhaustive(newIsExhaustive: Boolean) {

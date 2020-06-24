@@ -6,6 +6,7 @@
 package org.jetbrains.kotlin.ir.builders.declarations
 
 import org.jetbrains.kotlin.descriptors.Modality
+import org.jetbrains.kotlin.ir.declarations.IrProperty
 
 class IrPropertyBuilder : IrDeclarationBuilder() {
     var modality: Modality = Modality.FINAL
@@ -16,4 +17,17 @@ class IrPropertyBuilder : IrDeclarationBuilder() {
     var isDelegated: Boolean = false
     var isExternal: Boolean = false
     var isExpect: Boolean = false
+    var isFakeOverride: Boolean = false
+
+    fun updateFrom(from: IrProperty) {
+        super.updateFrom(from)
+
+        isVar = from.isVar
+        isConst = from.isConst
+        isLateinit = from.isLateinit
+        isDelegated = from.isDelegated
+        isExternal = from.isExternal
+        isExpect = from.isExpect
+        isFakeOverride = from.isFakeOverride
+    }
 }

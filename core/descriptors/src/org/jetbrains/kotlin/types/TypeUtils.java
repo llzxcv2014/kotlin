@@ -428,9 +428,11 @@ public class TypeUtils {
             SmartSet<KotlinType> visited
     ) {
         if (type == null) return false;
-        if (visited != null && visited.contains(type)) return false;
 
         UnwrappedType unwrappedType = type.unwrap();
+
+        if (noExpectedType(type)) return isSpecialType.invoke(unwrappedType);
+        if (visited != null && visited.contains(type)) return false;
         if (isSpecialType.invoke(unwrappedType)) return true;
 
         if (visited == null) {
@@ -545,7 +547,7 @@ public class TypeUtils {
             return literalTypeConstructor.getApproximatedType();
         }
 
-        // If approximated type does not mathc expected type then expected type is very
+        // If approximated type does not match expected type then expected type is very
         //  specific type (e.g. Comparable<Byte>), so only one of possible types could match it
         KotlinType approximatedType = literalTypeConstructor.getApproximatedType();
         if (KotlinTypeChecker.DEFAULT.isSubtypeOf(approximatedType, expectedType)) {

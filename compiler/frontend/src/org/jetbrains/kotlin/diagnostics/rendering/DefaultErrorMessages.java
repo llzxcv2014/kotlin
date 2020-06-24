@@ -306,6 +306,7 @@ public class DefaultErrorMessages {
         MAP.put(ACTUAL_MISSING, "Declaration must be marked with 'actual'");
 
         MAP.put(OPTIONAL_EXPECTATION_NOT_ON_EXPECTED, "'@OptionalExpectation' can only be used on an expected annotation class");
+        MAP.put(NESTED_OPTIONAL_EXPECTATION, "'@OptionalExpectation' cannot be used on a nested class");
         MAP.put(OPTIONAL_DECLARATION_OUTSIDE_OF_ANNOTATION_ENTRY, "Declaration annotated with '@OptionalExpectation' can only be used inside an annotation entry");
         MAP.put(OPTIONAL_DECLARATION_USAGE_IN_NON_COMMON_SOURCE, "Declaration annotated with '@OptionalExpectation' can only be used in common module sources");
 
@@ -895,6 +896,9 @@ public class DefaultErrorMessages {
         MAP.put(REIFIED_TYPE_FORBIDDEN_SUBSTITUTION, "Cannot use ''{0}'' as reified type parameter", RENDER_TYPE);
         MAP.put(REIFIED_TYPE_UNSAFE_SUBSTITUTION, "It may be not safe to use ''{0}'' as an argument for a reified type parameter. Use a non-generic type or * if possible", RENDER_TYPE);
         MAP.put(TYPE_PARAMETERS_NOT_ALLOWED, "Type parameters are not allowed here");
+        MAP.put(CANDIDATE_CHOSEN_USING_OVERLOAD_RESOLUTION_BY_LAMBDA_ANNOTATION, "Candidate was chosen only by @OverloadResolutionByLambdaReturnType annotation");
+
+        MAP.put(COMPATIBILITY_WARNING, "Candidate resolution will be changed, please invoke explicitly ''{0}''", COMPATIBILITY_CANDIDATE);
 
         MAP.put(TYPE_PARAMETER_OF_PROPERTY_NOT_USED_IN_RECEIVER, "Type parameter of a property must be used in its receiver type");
 

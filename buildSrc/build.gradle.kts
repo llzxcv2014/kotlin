@@ -22,7 +22,7 @@ buildscript {
     }
 
     dependencies {
-        classpath("org.jetbrains.kotlin:kotlin-build-gradle-plugin:0.0.15")
+        classpath("org.jetbrains.kotlin:kotlin-build-gradle-plugin:0.0.17")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:${project.bootstrapKotlinVersion}")
         classpath("org.jetbrains.kotlin:kotlin-sam-with-receiver:${project.bootstrapKotlinVersion}")
     }
@@ -55,6 +55,10 @@ gradlePlugin {
     }
 }
 
+kotlinDslPluginOptions {
+    experimentalWarning.set(false)
+}
+
 fun Project.getBooleanProperty(name: String): Boolean? = this.findProperty(name)?.let {
     val v = it.toString()
     if (v.isBlank()) true
@@ -68,7 +72,6 @@ rootProject.apply {
 val isTeamcityBuild = kotlinBuildProperties.isTeamcityBuild
 val intellijUltimateEnabled by extra(kotlinBuildProperties.intellijUltimateEnabled)
 val intellijSeparateSdks by extra(project.getBooleanProperty("intellijSeparateSdks") ?: false)
-val verifyDependencyOutput by extra( getBooleanProperty("kotlin.build.dependency.output.verification") ?: isTeamcityBuild)
 
 extra["intellijReleaseType"] = when {
     extra["versions.intellijSdk"]?.toString()?.contains("-EAP-") == true -> "snapshots"
@@ -93,7 +96,8 @@ repositories {
 
 dependencies {
     implementation(kotlin("stdlib", embeddedKotlinVersion))
-    implementation("org.jetbrains.kotlin:kotlin-build-gradle-plugin:0.0.15")
+    implementation("org.jetbrains.kotlin:kotlin-build-gradle-plugin:0.0.17")
+    implementation("com.gradle.publish:plugin-publish-plugin:0.11.0")
 
     implementation("net.rubygrapefruit:native-platform:${property("versions.native-platform")}")
     implementation("net.rubygrapefruit:native-platform-windows-amd64:${property("versions.native-platform")}")
@@ -102,7 +106,7 @@ dependencies {
 
     implementation("com.github.jengelman.gradle.plugins:shadow:${rootProject.extra["versions.shadow"]}")
     implementation("net.sf.proguard:proguard-gradle:6.2.2")
-    implementation("org.jetbrains.intellij.deps:asm-all:7.0.1")
+    implementation("org.jetbrains.intellij.deps:asm-all:8.0.1")
 
     implementation("gradle.plugin.org.jetbrains.gradle.plugin.idea-ext:gradle-idea-ext:0.5")
 }

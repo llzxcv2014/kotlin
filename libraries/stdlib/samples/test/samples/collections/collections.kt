@@ -1,17 +1,6 @@
 /*
- * Copyright 2010-2017 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright 2010-2020 JetBrains s.r.o. and Kotlin Programming Language contributors.
+ * Use of this source code is governed by the Apache 2.0 license that can be found in the license/LICENSE.txt file.
  */
 
 package samples.collections
@@ -550,6 +539,14 @@ class Collections {
         }
 
         @Sample
+        fun flatMapIndexed() {
+            val data: List<String> = listOf("Abcd", "efgh", "Klmn")
+            val selected: List<Boolean> = data.map { it.any { c -> c.isUpperCase() } }
+            val result = data.flatMapIndexed { index, s -> if (selected[index]) s.toList() else emptyList() }
+            assertPrints(result, "[A, b, c, d, K, l, m, n]")
+        }
+
+        @Sample
         fun take() {
             val chars = ('a'..'z').toList()
             assertPrints(chars.take(3), "[a, b, c]")
@@ -722,12 +719,21 @@ class Collections {
         }
 
         @Sample
-        fun scanReduce() {
+        fun runningFold() {
             val strings = listOf("a", "b", "c", "d")
-            assertPrints(strings.scanReduce { acc, string -> acc + string }, "[a, ab, abc, abcd]")
-            assertPrints(strings.scanReduceIndexed { index, acc, string -> acc + string + index }, "[a, ab1, ab1c2, ab1c2d3]")
+            assertPrints(strings.runningFold("s") { acc, string -> acc + string }, "[s, sa, sab, sabc, sabcd]")
+            assertPrints(strings.runningFoldIndexed("s") { index, acc, string -> acc + string + index }, "[s, sa0, sa0b1, sa0b1c2, sa0b1c2d3]")
 
-            assertPrints(emptyList<String>().scanReduce { _, _ -> "X" }, "[]")
+            assertPrints(emptyList<String>().runningFold("s") { _, _ -> "X" }, "[s]")
+        }
+
+        @Sample
+        fun runningReduce() {
+            val strings = listOf("a", "b", "c", "d")
+            assertPrints(strings.runningReduce { acc, string -> acc + string }, "[a, ab, abc, abcd]")
+            assertPrints(strings.runningReduceIndexed { index, acc, string -> acc + string + index }, "[a, ab1, ab1c2, ab1c2d3]")
+
+            assertPrints(emptyList<String>().runningReduce { _, _ -> "X" }, "[]")
         }
     }
 
@@ -800,5 +806,34 @@ class Collections {
             assertPrints(people.joinToString(), "Sweyn Forkbeard, Ragnar Lodbrok, Bjorn Ironside")
         }
 
+        @Sample
+        fun sortedBy() {
+            val list = listOf("aaa", "cc", "bbbb")
+            val sorted = list.sortedBy { it.length }
+
+            assertPrints(list, "[aaa, cc, bbbb]")
+            assertPrints(sorted, "[cc, aaa, bbbb]")
+        }
+    }
+
+    class Filtering {
+
+        @Sample
+        fun filter() {
+            val numbers: List<Int> = listOf(1, 2, 3, 4, 5, 6, 7)
+            val evenNumbers = numbers.filter { it % 2 == 0 }
+            val notMultiplesOf3 = numbers.filterNot { number -> number % 3 == 0 }
+
+            assertPrints(evenNumbers, "[2, 4, 6]")
+            assertPrints(notMultiplesOf3, "[1, 2, 4, 5, 7]")
+        }
+
+        @Sample
+        fun filterNotNull() {
+            val numbers: List<Int?> = listOf(1, 2, null, 4)
+            val nonNullNumbers = numbers.filterNotNull()
+
+            assertPrints(nonNullNumbers, "[1, 2, 4]")
+        }
     }
 }

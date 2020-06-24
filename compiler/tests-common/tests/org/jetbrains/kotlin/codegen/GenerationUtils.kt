@@ -25,6 +25,7 @@ import org.jetbrains.kotlin.TestsCompiletimeError
 import org.jetbrains.kotlin.asJava.finder.JavaElementFinder
 import org.jetbrains.kotlin.backend.common.phaser.PhaseConfig
 import org.jetbrains.kotlin.backend.common.serialization.signature.IdSignatureDescriptor
+import org.jetbrains.kotlin.backend.jvm.JvmGeneratorExtensions
 import org.jetbrains.kotlin.backend.jvm.JvmIrCodegenFactory
 import org.jetbrains.kotlin.backend.jvm.jvmPhases
 import org.jetbrains.kotlin.cli.common.CLIConfigurationKeys
@@ -38,19 +39,26 @@ import org.jetbrains.kotlin.config.CommonConfigurationKeys
 import org.jetbrains.kotlin.config.CompilerConfiguration
 import org.jetbrains.kotlin.config.JVMConfigurationKeys
 import org.jetbrains.kotlin.config.languageVersionSettings
+import org.jetbrains.kotlin.container.get
+import org.jetbrains.kotlin.descriptors.ModuleDescriptor
 import org.jetbrains.kotlin.fir.backend.Fir2IrConverter
+import org.jetbrains.kotlin.fir.backend.jvm.FirJvmBackendClassResolver
+import org.jetbrains.kotlin.fir.backend.jvm.FirJvmClassCodegen
+import org.jetbrains.kotlin.fir.backend.jvm.FirJvmKotlinMangler
 import org.jetbrains.kotlin.fir.builder.RawFirBuilder
 import org.jetbrains.kotlin.fir.createSession
 import org.jetbrains.kotlin.fir.resolve.firProvider
-import org.jetbrains.kotlin.fir.resolve.impl.FirProviderImpl
-import org.jetbrains.kotlin.fir.resolve.transformers.FirTotalResolveTransformer
+import org.jetbrains.kotlin.fir.resolve.providers.impl.FirProviderImpl
+import org.jetbrains.kotlin.fir.resolve.transformers.FirTotalResolveProcessor
 import org.jetbrains.kotlin.ir.backend.jvm.jvmResolveLibraries
 import org.jetbrains.kotlin.ir.backend.jvm.serialization.JvmManglerDesc
 import org.jetbrains.kotlin.load.kotlin.PackagePartProvider
 import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.resolve.AnalyzingUtils
 import org.jetbrains.kotlin.resolve.BindingTrace
+import org.jetbrains.kotlin.resolve.CompilerEnvironment
 import org.jetbrains.kotlin.resolve.lazy.JvmResolveUtil
+import org.jetbrains.kotlin.resolve.lazy.declarations.FileBasedDeclarationProviderFactory
 import org.jetbrains.kotlin.util.DummyLogger
 import java.io.File
 
@@ -86,7 +94,7 @@ object GenerationUtils {
     ): GenerationState {
         val project = files.first().project
         val state = if (configuration.getBoolean(CommonConfigurationKeys.USE_FIR)) {
-            compileFilesUsingFrontendIR(project, files, configuration, classBuilderFactory, packagePartProvider)
+            compileFilesUsingFrontendIR(project, files, configuration, classBuilderFactory, packagePartProvider, trace)
         } else {
             compileFilesUsingStandardMode(project, files, configuration, classBuilderFactory, packagePartProvider, trace)
         }
@@ -106,7 +114,8 @@ object GenerationUtils {
         files: List<KtFile>,
         configuration: CompilerConfiguration,
         classBuilderFactory: ClassBuilderFactory,
-        packagePartProvider: (GlobalSearchScope) -> PackagePartProvider
+        packagePartProvider: (GlobalSearchScope) -> PackagePartProvider,
+        trace: BindingTrace
     ): GenerationState {
         Extensions.getArea(project)
             .getExtensionPoint(PsiElementFinder.EP_NAME)
@@ -119,34 +128,53 @@ object GenerationUtils {
 
         val firProvider = (session.firProvider as FirProviderImpl)
         val builder = RawFirBuilder(session, firProvider.kotlinScopeProvider, stubMode = false)
-        val resolveTransformer = FirTotalResolveTransformer()
+        val resolveTransformer = FirTotalResolveProcessor(session)
         val firFiles = files.map {
             val firFile = builder.buildFirFile(it)
             firProvider.recordFile(firFile)
             firFile
         }.also {
             try {
-                resolveTransformer.processFiles(it)
+                resolveTransformer.process(it)
             } catch (e: Exception) {
                 throw e
             }
         }
-        val (moduleFragment, symbolTable, sourceManager) =
-            Fir2IrConverter.createModuleFragment(session, firFiles, configuration.languageVersionSettings, signaturer = IdSignatureDescriptor(
-                JvmManglerDesc()))
+        val (moduleFragment, symbolTable, sourceManager, components) =
+            Fir2IrConverter.createModuleFragment(
+                session, resolveTransformer.scopeSession, firFiles,
+                configuration.languageVersionSettings,
+                signaturer = IdSignatureDescriptor(JvmManglerDesc()),
+                // TODO: differentiate JVM resolve from other targets, such as JS resolve.
+                generatorExtensions = JvmGeneratorExtensions(),
+                mangler = FirJvmKotlinMangler(session)
+            )
         val dummyBindingContext = NoScopeRecordCliBindingTrace().bindingContext
 
         val codegenFactory = JvmIrCodegenFactory(configuration.get(CLIConfigurationKeys.PHASE_CONFIG) ?: PhaseConfig(jvmPhases))
+
+        // Create and initialize the test module and its dependencies
+        val container = TopDownAnalyzerFacadeForJVM.createContainer(
+            project, files, trace, configuration, packagePartProvider, ::FileBasedDeclarationProviderFactory, CompilerEnvironment,
+            TopDownAnalyzerFacadeForJVM.newModuleSearchScope(project, files), emptyList()
+        )
         val generationState = GenerationState.Builder(
-            project, classBuilderFactory, moduleFragment.descriptor, dummyBindingContext, files, configuration
+            project, classBuilderFactory, container.get<ModuleDescriptor>(), dummyBindingContext, files, configuration
         ).codegenFactory(
             codegenFactory
         ).isIrBackend(
             true
+        ).jvmBackendClassResolver(
+            FirJvmBackendClassResolver(components)
         ).build()
 
         generationState.beforeCompile()
-        codegenFactory.generateModuleInFrontendIRMode(generationState, moduleFragment, symbolTable, sourceManager)
+        codegenFactory.generateModuleInFrontendIRMode(
+            generationState, moduleFragment, symbolTable, sourceManager
+        ) { irClass, context, irFunction ->
+            FirJvmClassCodegen(irClass, context, irFunction, session)
+        }
+
         generationState.factory.done()
         return generationState
     }

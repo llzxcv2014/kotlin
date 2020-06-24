@@ -10,9 +10,12 @@ import org.jetbrains.kotlin.fir.declarations.*
 import org.jetbrains.kotlin.fir.expressions.*
 import org.jetbrains.kotlin.fir.resolve.ResolutionMode
 import org.jetbrains.kotlin.fir.resolve.ScopeSession
+import org.jetbrains.kotlin.fir.resolve.asTowerDataElement
+import org.jetbrains.kotlin.fir.resolve.dfa.DataFlowAnalyzerContext
 import org.jetbrains.kotlin.fir.resolve.transformers.ReturnTypeCalculator
 import org.jetbrains.kotlin.fir.resolve.transformers.ReturnTypeCalculatorForFullBodyResolve
-import org.jetbrains.kotlin.fir.scopes.addImportingScopes
+import org.jetbrains.kotlin.fir.resolve.transformers.withScopeCleanup
+import org.jetbrains.kotlin.fir.scopes.createImportingScopes
 import org.jetbrains.kotlin.fir.types.FirImplicitTypeRef
 import org.jetbrains.kotlin.fir.types.FirResolvedTypeRef
 import org.jetbrains.kotlin.fir.types.FirTypeRef
@@ -26,24 +29,37 @@ open class FirBodyResolveTransformer(
     phase: FirResolvePhase,
     override var implicitTypeOnly: Boolean,
     scopeSession: ScopeSession,
-    val returnTypeCalculator: ReturnTypeCalculator = ReturnTypeCalculatorForFullBodyResolve()
+    val returnTypeCalculator: ReturnTypeCalculator = ReturnTypeCalculatorForFullBodyResolve(),
+    outerBodyResolveContext: BodyResolveContext? = null
 ) : FirAbstractBodyResolveTransformer(phase) {
     private var packageFqName = FqName.ROOT
 
-    override val components: BodyResolveTransformerComponents = BodyResolveTransformerComponents(session, scopeSession, this)
+    final override val context: BodyResolveContext =
+        outerBodyResolveContext ?: BodyResolveContext(returnTypeCalculator, DataFlowAnalyzerContext.empty(session))
+    final override val components: BodyResolveTransformerComponents =
+        BodyResolveTransformerComponents(session, scopeSession, this, context)
 
-    private val expressionsTransformer = FirExpressionsResolveTransformer(this)
-    private val declarationsTransformer = FirDeclarationsResolveTransformer(this)
+    internal open val expressionsTransformer = FirExpressionsResolveTransformer(this)
+    protected open val declarationsTransformer = FirDeclarationsResolveTransformer(this)
     private val controlFlowStatementsTransformer = FirControlFlowStatementsResolveTransformer(this)
 
     override fun transformFile(file: FirFile, data: ResolutionMode): CompositeTransformResult<FirFile> {
-        components.cleanContextForAnonymousFunction()
+        checkSessionConsistency(file)
+        context.cleanContextForAnonymousFunction()
+        context.cleanDataFlowContext()
         @OptIn(PrivateForInline::class)
-        components.file = file
+        context.file = file
         packageFqName = file.packageFqName
-        return withScopeCleanup(components.topLevelScopes) {
-            components.topLevelScopes.addImportingScopes(file, session, components.scopeSession)
-            super.transformFile(file, data)
+        return withScopeCleanup(context.fileImportsScope) {
+            context.withTowerDataCleanup {
+                val importingScopes = createImportingScopes(file, session, components.scopeSession)
+                context.fileImportsScope += importingScopes
+                context.addNonLocalTowerDataElements(importingScopes.map { it.asTowerDataElement(isLocal = false) })
+
+                file.replaceResolvePhase(transformerPhase)
+                @Suppress("UNCHECKED_CAST")
+                transformDeclarationContent(file, data) as CompositeTransformResult<FirFile>
+            }
         }
     }
 
@@ -173,10 +189,30 @@ open class FirBodyResolveTransformer(
         return expressionsTransformer.transformAugmentedArraySetCall(augmentedArraySetCall, data)
     }
 
+    override fun transformSafeCallExpression(
+        safeCallExpression: FirSafeCallExpression,
+        data: ResolutionMode
+    ): CompositeTransformResult<FirStatement> {
+        return expressionsTransformer.transformSafeCallExpression(safeCallExpression, data)
+    }
+
+    override fun transformCheckedSafeCallSubject(
+        checkedSafeCallSubject: FirCheckedSafeCallSubject,
+        data: ResolutionMode
+    ): CompositeTransformResult<FirStatement> {
+        return expressionsTransformer.transformCheckedSafeCallSubject(checkedSafeCallSubject, data)
+    }
+
     // ------------------------------------- Declarations -------------------------------------
 
     override fun transformDeclaration(declaration: FirDeclaration, data: ResolutionMode): CompositeTransformResult<FirDeclaration> {
         return declarationsTransformer.transformDeclaration(declaration, data)
+    }
+
+    open fun transformDeclarationContent(
+        declaration: FirDeclaration, data: ResolutionMode
+    ): CompositeTransformResult<FirDeclaration> {
+        return transformElement(declaration, data)
     }
 
     override fun transformDeclarationStatus(

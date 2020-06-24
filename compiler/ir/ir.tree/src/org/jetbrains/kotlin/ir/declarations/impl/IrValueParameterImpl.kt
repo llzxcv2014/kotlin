@@ -18,6 +18,7 @@ package org.jetbrains.kotlin.ir.declarations.impl
 
 import org.jetbrains.kotlin.descriptors.ParameterDescriptor
 import org.jetbrains.kotlin.descriptors.ValueParameterDescriptor
+import org.jetbrains.kotlin.ir.ObsoleteDescriptorBasedAPI
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationOrigin
 import org.jetbrains.kotlin.ir.declarations.IrValueParameter
 import org.jetbrains.kotlin.ir.declarations.impl.carriers.ValueParameterCarrier
@@ -46,35 +47,26 @@ class IrValueParameterImpl(
     IrValueParameter,
     ValueParameterCarrier {
 
-    constructor(
-        startOffset: Int,
-        endOffset: Int,
-        origin: IrDeclarationOrigin,
-        symbol: IrValueParameterSymbol,
-        type: IrType,
-        varargElementType: IrType?
-    ) :
-            this(
-                startOffset, endOffset, origin,
-                symbol,
-                symbol.descriptor.name,
-                symbol.descriptor.safeAs<ValueParameterDescriptor>()?.index ?: -1,
-                type,
-                varargElementType,
-                symbol.descriptor.safeAs<ValueParameterDescriptor>()?.isCrossinline ?: false,
-                symbol.descriptor.safeAs<ValueParameterDescriptor>()?.isNoinline ?: false
-            )
-
+    @ObsoleteDescriptorBasedAPI
     constructor(
         startOffset: Int,
         endOffset: Int,
         origin: IrDeclarationOrigin,
         descriptor: ParameterDescriptor,
         type: IrType,
-        varargElementType: IrType?
-    ) :
-            this(startOffset, endOffset, origin, IrValueParameterSymbolImpl(descriptor), type, varargElementType)
+        varargElementType: IrType?,
+        name: Name = descriptor.name,
+        symbol: IrValueParameterSymbol = IrValueParameterSymbolImpl(descriptor)
+    ) : this(
+        startOffset, endOffset, origin, symbol,
+        name,
+        index = descriptor.safeAs<ValueParameterDescriptor>()?.index ?: -1,
+        type = type, varargElementType = varargElementType,
+        isCrossinline = descriptor.safeAs<ValueParameterDescriptor>()?.isCrossinline ?: false,
+        isNoinline = descriptor.safeAs<ValueParameterDescriptor>()?.isNoinline ?: false
+    )
 
+    @ObsoleteDescriptorBasedAPI
     override val descriptor: ParameterDescriptor = symbol.descriptor
 
     init {

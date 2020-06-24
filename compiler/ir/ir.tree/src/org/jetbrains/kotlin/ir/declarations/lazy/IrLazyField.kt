@@ -7,6 +7,7 @@ package org.jetbrains.kotlin.ir.declarations.lazy
 
 import org.jetbrains.kotlin.descriptors.PropertyDescriptor
 import org.jetbrains.kotlin.descriptors.Visibility
+import org.jetbrains.kotlin.ir.ObsoleteDescriptorBasedAPI
 import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationOrigin
 import org.jetbrains.kotlin.ir.declarations.IrField
@@ -22,6 +23,7 @@ import org.jetbrains.kotlin.ir.visitors.IrElementTransformer
 import org.jetbrains.kotlin.ir.visitors.IrElementVisitor
 import org.jetbrains.kotlin.name.Name
 
+@OptIn(ObsoleteDescriptorBasedAPI::class)
 class IrLazyField(
     startOffset: Int,
     endOffset: Int,
@@ -33,7 +35,6 @@ class IrLazyField(
     override val isFinal: Boolean,
     override val isExternal: Boolean,
     override val isStatic: Boolean,
-    override val isFakeOverride: Boolean,
     stubGenerator: DeclarationStubGenerator,
     typeTranslator: TypeTranslator
 ) : IrLazyDeclarationBase(startOffset, endOffset, origin, stubGenerator, typeTranslator),
@@ -47,12 +48,6 @@ class IrLazyField(
         descriptor.backingField?.annotations
             ?.mapNotNullTo(mutableListOf(), typeTranslator.constantValueGenerator::generateAnnotationConstructorCall)
             ?: mutableListOf()
-    }
-
-    override var overriddenSymbols: List<IrFieldSymbol> by lazyVar {
-        symbol.descriptor.overriddenDescriptors.map {
-            stubGenerator.generateFieldStub(it.original).symbol
-        }.toMutableList()
     }
 
     override var type: IrType by lazyVar {

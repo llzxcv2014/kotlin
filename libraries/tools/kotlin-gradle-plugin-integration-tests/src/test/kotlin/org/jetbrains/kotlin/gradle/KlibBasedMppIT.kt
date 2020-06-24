@@ -9,8 +9,10 @@ import org.jetbrains.kotlin.gradle.util.modify
 import org.jetbrains.kotlin.konan.target.HostManager
 import org.junit.Assume
 import java.io.File
+import java.util.zip.ZipFile
 import kotlin.test.Test
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class KlibBasedMppIT : BaseGradleIT() {
     override val defaultGradleVersion = GradleVersionRequired.AtLeast("6.0")
@@ -29,9 +31,25 @@ class KlibBasedMppIT : BaseGradleIT() {
     }
 
     @Test
+    fun testPublishingAndConsumptionWithEmptySourceSet() = testBuildWithDependency {
+        // KT-36674
+        projectDir.resolve("$dependencyModuleName/src/$hostSpecificSourceSet").run {
+            assertTrue { isDirectory }
+            deleteRecursively()
+        }
+        publishProjectDepAndAddDependency(validateHostSpecificPublication = false)
+    }
+
+    @Test
     fun testBuildWithPublishedDependency() = testBuildWithDependency {
+        publishProjectDepAndAddDependency(validateHostSpecificPublication = true)
+    }
+
+    private fun Project.publishProjectDepAndAddDependency(validateHostSpecificPublication: Boolean) {
         build(":$dependencyModuleName:publish") {
             assertSuccessful()
+            if (validateHostSpecificPublication)
+                checkPublishedHostSpecificMetadata(this@build)
         }
 
         gradleBuildScript().appendText("\n" + """
@@ -51,6 +69,11 @@ class KlibBasedMppIT : BaseGradleIT() {
 
     private fun testBuildWithDependency(configureDependency: Project.() -> Unit) = with(Project("common-klib-lib-and-app")) {
         embedProject(Project("common-klib-lib-and-app"), renameTo = dependencyModuleName)
+
+        projectDir.resolve("$dependencyModuleName/src/commonMain/kotlin/TestKt37832.kt").writeText(
+            "package com.example.test.kt37832" + "\n" + "class MyException : RuntimeException()"
+        )
+
         gradleBuildScript().modify(::transformBuildScriptWithPluginsDsl)
 
         projectDir.resolve(dependencyModuleName + "/src").walkTopDown().filter { it.extension == "kt" }.forEach { file ->
@@ -81,7 +104,8 @@ class KlibBasedMppIT : BaseGradleIT() {
 
         val tasksToExecute = listOf(
             ":compileJvmAndJsMainKotlinMetadata",
-            ":compileLinuxMainKotlinMetadata"
+            ":compileLinuxMainKotlinMetadata",
+            ":compile${hostSpecificSourceSet.capitalize()}KotlinMetadata"
         )
 
         build("assemble") {
@@ -106,6 +130,51 @@ class KlibBasedMppIT : BaseGradleIT() {
                 assertFalse(classpathHasKNStdlib(getClasspath(":compileCommonMainKotlinMetadata")))
                 assertFalse(classpathHasKNStdlib(getClasspath(":compileJvmAndJsMainKotlinMetadata")))
             }
+        }
+    }
+
+    private val hostSpecificSourceSet = when {
+        HostManager.hostIsMac -> "iosMain"
+        HostManager.hostIsLinux -> "embeddedMain"
+        HostManager.hostIsMingw -> "windowsMain"
+        else -> error("unexpected host")
+    }
+
+    private fun checkPublishedHostSpecificMetadata(compiledProject: CompiledProject) = with(compiledProject) {
+        val groupDir = project.projectDir.resolve("repo/com/example")
+
+        assertTasksExecuted(":$dependencyModuleName:compile${hostSpecificSourceSet.capitalize()}KotlinMetadata")
+
+        // Check that the metadata JAR doesn't contain the host-specific source set entries, but contains the shared-Native source set
+        // that can be built on every host:
+
+        ZipFile(groupDir.resolve("$dependencyModuleName-metadata/1.0/$dependencyModuleName-metadata-1.0.jar")).use { metadataJar ->
+            assertTrue { metadataJar.entries().asSequence().none { it.name.startsWith(hostSpecificSourceSet) } }
+            assertTrue { metadataJar.entries().asSequence().any { it.name.startsWith("linuxMain") } }
+        }
+
+        // Then check that in the host-specific modules, there's a metadata artifact that contains the host-specific source set but not the
+        // common source sets:
+
+        val hostSpecificTargets = when {
+            HostManager.hostIsMac -> listOf("iosArm64", "iosX64")
+            HostManager.hostIsLinux -> listOf("linuxMips32", "linuxMipsel32")
+            HostManager.hostIsMingw -> listOf("mingwX64", "mingwX86")
+            else -> error("unexpected host")
+        }
+
+        hostSpecificTargets.forEach { targetName ->
+            val moduleName = "$dependencyModuleName-${targetName.toLowerCase()}"
+            ZipFile(groupDir.resolve("$moduleName/1.0/$moduleName-1.0-metadata.jar")).use { metadataJar ->
+                assertTrue { metadataJar.entries().asSequence().any { it.name.startsWith(hostSpecificSourceSet) } }
+                assertTrue { metadataJar.entries().asSequence().none { it.name.startsWith("commonMain") } }
+            }
+        }
+
+        // Also check that the targets that don't include any host-specific sources don't even have the metadata artifact:
+
+        groupDir.resolve("$dependencyModuleName-linuxx64/1.0/$dependencyModuleName-linuxx64-1.0-metadata.jar").let { metadataJar ->
+            assertTrue { !metadataJar.exists() }
         }
     }
 
@@ -153,6 +222,30 @@ class KlibBasedMppIT : BaseGradleIT() {
         val compileNativeMetadataTaskName = "compileLinuxMainKotlinMetadata"
         build(":$compileNativeMetadataTaskName") {
             assertSuccessful()
+        }
+    }
+
+    @Test
+    fun testAvoidSkippingSharedNativeSourceSetKt38746() = with(Project("hierarchical-all-native")) {
+        val targetNames = listOf(
+            // Try different alphabetical ordering of the targets to ensure that the behavior doesn't depend on it, as with 'first target'
+            listOf("a1", "a2", "a3"),
+            listOf("a3", "a1", "a2"),
+            listOf("a2", "a3", "a1"),
+        )
+        val targetParamNames = listOf("mingwTargetName", "linuxTargetName", "macosTargetName", "currentHostTargetName")
+        for (names in targetNames) {
+            val currentHostTargetName = when {
+                HostManager.hostIsMingw -> names[0]
+                HostManager.hostIsLinux -> names[1]
+                HostManager.hostIsMac -> names[2]
+                else -> error("unexpected host")
+            }
+            val params = targetParamNames.zip(names + currentHostTargetName) { k, v -> "-P$k=$v" }
+            build(":clean", ":compileCurrentHostAndLinuxKotlinMetadata", *params.toTypedArray()) {
+                assertSuccessful()
+                assertTasksExecuted(":compileCurrentHostAndLinuxKotlinMetadata", ":compileAllNativeKotlinMetadata")
+            }
         }
     }
 }

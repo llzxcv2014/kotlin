@@ -41,7 +41,7 @@ import org.jetbrains.kotlin.utils.addToStdlib.firstIsInstanceOrNull
 class FoldInitializerAndIfToElvisInspection : AbstractApplicabilityBasedInspection<KtIfExpression>(KtIfExpression::class.java) {
     override fun inspectionText(element: KtIfExpression): String = KotlinBundle.message("if.null.return.break.foldable.to")
 
-    override val defaultFixText: String = KotlinBundle.message("replace.if.with.elvis.operator")
+    override val defaultFixText: String get() = KotlinBundle.message("replace.if.with.elvis.operator")
 
     override fun inspectionHighlightRangeInElement(element: KtIfExpression) = element.fromIfKeywordToRightParenthesisTextRangeInThis()
 
@@ -86,7 +86,8 @@ class FoldInitializerAndIfToElvisInspection : AbstractApplicabilityBasedInspecti
             val childRangeAfter = childRangeBefore.withoutLastStatement()
 
             val margin = CodeStyle.getSettings(element.containingKtFile).defaultRightMargin
-            val pattern = elvisPattern(declaration.textLength + ifNullExpr.textLength + 5 >= margin || element.then?.hasComments() == true)
+            val declarationTextLength = declaration.text.split("\n").lastOrNull()?.trim()?.length ?: 0
+            val pattern = elvisPattern(declarationTextLength + ifNullExpr.textLength + 5 >= margin || element.then?.hasComments() == true)
 
             val elvis = factory.createExpressionByPattern(pattern, initializer, ifNullExpr) as KtBinaryExpression
 

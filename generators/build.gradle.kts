@@ -38,9 +38,14 @@ dependencies {
     testCompile(projectTests(":compiler:cli"))
     testCompile(projectTests(":idea:idea-maven"))
     testCompile(projectTests(":idea:idea-fir"))
+    testCompile(projectTests(":idea:idea-frontend-fir"))
+    testCompile(projectTests(":idea:idea-frontend-fir:idea-fir-low-level-api"))
     testCompile(projectTests(":j2k"))
     testCompile(projectTests(":nj2k"))
-    testCompile(projectTests(":libraries:tools:new-project-wizard:new-project-wizard-cli"))
+    if (Ide.IJ()) {
+        testCompile(projectTests(":libraries:tools:new-project-wizard:new-project-wizard-cli"))
+        testCompile(projectTests(":idea:idea-new-project-wizard"))
+    }
     testCompile(projectTests(":idea:idea-android"))
     testCompile(projectTests(":idea:performanceTests"))
     testCompile(projectTests(":idea:scripting-support"))
@@ -54,6 +59,7 @@ dependencies {
     testCompile(projectTests(":kotlin-noarg-compiler-plugin"))
     testCompile(projectTests(":kotlin-sam-with-receiver-compiler-plugin"))
     testCompile(projectTests(":kotlinx-serialization-compiler-plugin"))
+    testCompile(projectTests(":plugins:fir:fir-plugin-prototype"))
     testCompile(projectTests(":idea:jvm-debugger:jvm-debugger-test"))
     testCompile(projectTests(":generators:test-generator"))
     testCompile(projectTests(":idea"))

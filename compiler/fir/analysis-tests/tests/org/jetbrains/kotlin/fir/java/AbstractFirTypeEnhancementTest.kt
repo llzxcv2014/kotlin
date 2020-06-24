@@ -33,7 +33,7 @@ import org.jetbrains.kotlin.fir.java.scopes.JavaClassEnhancementScope
 import org.jetbrains.kotlin.fir.resolve.ScopeSession
 import org.jetbrains.kotlin.fir.resolve.buildUseSiteMemberScope
 import org.jetbrains.kotlin.fir.resolve.firSymbolProvider
-import org.jetbrains.kotlin.fir.resolve.impl.FirCompositeSymbolProvider
+import org.jetbrains.kotlin.fir.resolve.providers.impl.FirCompositeSymbolProvider
 import org.jetbrains.kotlin.fir.scopes.impl.FirCompositeScope
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
@@ -190,7 +190,7 @@ abstract class AbstractFirTypeEnhancementTest : KtUsefulTestCase() {
                         for (declaration in javaClass.declarations) {
                             if (declaration in renderedDeclarations) continue
                             when (declaration) {
-                                is FirJavaConstructor -> enhancementScope.processFunctionsByName(javaClass.name) { symbol ->
+                                is FirJavaConstructor -> enhancementScope.processDeclaredConstructors { symbol ->
                                     val enhanced = symbol.fir
                                     if (enhanced !in renderedDeclarations) {
                                         enhanced.accept(renderer, null)

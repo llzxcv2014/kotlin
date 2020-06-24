@@ -41,8 +41,8 @@ import org.jetbrains.kotlin.idea.util.CallTypeAndReceiver
 import org.jetbrains.kotlin.idea.util.getResolutionScope
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.load.java.descriptors.JavaClassDescriptor
-import org.jetbrains.kotlin.load.java.sam.SamConstructorDescriptor
-import org.jetbrains.kotlin.load.java.sam.SamConstructorDescriptorKindExclude
+import org.jetbrains.kotlin.resolve.sam.SamConstructorDescriptor
+import org.jetbrains.kotlin.resolve.sam.SamConstructorDescriptorKindExclude
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.platform.jvm.isJvm
@@ -126,7 +126,7 @@ class BasicCompletionSession(
 
         if (parameters.isAutoPopup) {
             collector.addLookupElementPostProcessor { lookupElement ->
-                lookupElement.putUserData(LookupCancelWatcher.AUTO_POPUP_AT, position.startOffset)
+                lookupElement.putUserData(LookupCancelService.AUTO_POPUP_AT, position.startOffset)
                 lookupElement
             }
 
@@ -533,7 +533,7 @@ class BasicCompletionSession(
     }
 
     private fun wasAutopopupRecentlyCancelled(parameters: CompletionParameters) =
-        LookupCancelWatcher.getInstance(project).wasAutoPopupRecentlyCancelled(parameters.editor, position.startOffset)
+        LookupCancelService.getInstance(project).wasAutoPopupRecentlyCancelled(parameters.editor, position.startOffset)
 
     private val KEYWORDS_ONLY = object : CompletionKind {
         override val descriptorKindFilter: DescriptorKindFilter?

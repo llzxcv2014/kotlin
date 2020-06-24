@@ -45,6 +45,7 @@ import org.jetbrains.kotlin.resolve.scopes.receivers.*
 import org.jetbrains.kotlin.types.*
 import org.jetbrains.kotlin.types.expressions.*
 import org.jetbrains.kotlin.types.model.TypeSystemInferenceExtensionContext
+import org.jetbrains.kotlin.utils.KotlinExceptionWithAttachments
 import org.jetbrains.kotlin.utils.addToStdlib.firstIsInstanceOrNull
 import org.jetbrains.kotlin.utils.addToStdlib.firstNotNullResult
 import java.util.*
@@ -60,6 +61,7 @@ class PSICallResolver(
     private val kotlinToResolvedCallTransformer: KotlinToResolvedCallTransformer,
     private val kotlinCallResolver: KotlinCallResolver,
     private val typeApproximator: TypeApproximator,
+    private val implicitsResolutionFilter: ImplicitsExtensionsResolutionFilter,
     private val argumentTypeResolver: ArgumentTypeResolver,
     private val effectSystem: EffectSystem,
     private val constantExpressionEvaluator: ConstantExpressionEvaluator,
@@ -108,10 +110,6 @@ class PSICallResolver(
         if (result.isEmpty() && reportAdditionalDiagnosticIfNoCandidates(context, scopeTower, kotlinCallKind, kotlinCall)) {
             return OverloadResolutionResultsImpl.nameNotFound()
         }
-
-        result = candidateInterceptor.interceptResolvedCandidates(
-            result, context, kotlinCallResolver, name, resolutionKind, tracingStrategy
-        )
 
         val overloadResolutionResults = convertToOverloadResolutionResults<D>(context, result, tracingStrategy)
         return overloadResolutionResults.also {
@@ -396,6 +394,7 @@ class PSICallResolver(
         override val isNewInferenceEnabled: Boolean get() = context.languageVersionSettings.supportsFeature(LanguageFeature.NewInference)
         override val lexicalScope: LexicalScope get() = context.scope
         override val typeApproximator: TypeApproximator get() = this@PSICallResolver.typeApproximator
+        override val implicitsResolutionFilter: ImplicitsExtensionsResolutionFilter get() = this@PSICallResolver.implicitsResolutionFilter
         private val cache = HashMap<ReceiverParameterDescriptor, ReceiverValueWithSmartCastInfo>()
 
         override fun getImplicitReceiver(scope: LexicalScope): ReceiverValueWithSmartCastInfo? {
@@ -406,13 +405,46 @@ class PSICallResolver(
             }
         }
 
-        override fun interceptCandidates(
+        override fun interceptFunctionCandidates(
             resolutionScope: ResolutionScope,
             name: Name,
             initialResults: Collection<FunctionDescriptor>,
-            location: LookupLocation
+            location: LookupLocation,
+            dispatchReceiver: ReceiverValueWithSmartCastInfo?,
+            extensionReceiver: ReceiverValueWithSmartCastInfo?
         ): Collection<FunctionDescriptor> {
-            return candidateInterceptor.interceptCandidates(initialResults, this, context, resolutionScope, null, name, location)
+            return candidateInterceptor.interceptFunctionCandidates(
+                initialResults,
+                this,
+                context,
+                resolutionScope,
+                this@PSICallResolver,
+                name,
+                location,
+                dispatchReceiver,
+                extensionReceiver
+            )
+        }
+
+        override fun interceptVariableCandidates(
+            resolutionScope: ResolutionScope,
+            name: Name,
+            initialResults: Collection<VariableDescriptor>,
+            location: LookupLocation,
+            dispatchReceiver: ReceiverValueWithSmartCastInfo?,
+            extensionReceiver: ReceiverValueWithSmartCastInfo?
+        ): Collection<VariableDescriptor> {
+            return candidateInterceptor.interceptVariableCandidates(
+                initialResults,
+                this,
+                context,
+                resolutionScope,
+                this@PSICallResolver,
+                name,
+                location,
+                dispatchReceiver,
+                extensionReceiver
+            )
         }
     }
 
@@ -471,7 +503,7 @@ class PSICallResolver(
         private fun createReceiverCallArgument(variable: KotlinResolutionCandidate): SimpleKotlinCallArgument {
             variable.forceResolution()
             val variableReceiver = createReceiverValueWithSmartCastInfo(variable)
-            if (variableReceiver.possibleTypes.isNotEmpty()) {
+            if (variableReceiver.hasTypesFromSmartCasts()) {
                 return ReceiverExpressionKotlinCallArgument(
                     createReceiverValueWithSmartCastInfo(variable),
                     isForImplicitInvoke = true
@@ -547,6 +579,11 @@ class PSICallResolver(
         val externalArgument = if (oldCall.callType == Call.CallType.ARRAY_SET_METHOD) {
             assert(externalLambdaArguments.isEmpty()) {
                 "Unexpected lambda parameters for call $oldCall"
+            }
+            if (allValueArguments.isEmpty()) {
+                throw KotlinExceptionWithAttachments("Can not find an external argument for 'set' method")
+                    .withAttachment("callElement.kt", oldCall.callElement.text)
+                    .withAttachment("file.kt", oldCall.callElement.takeIf { it.isValid }?.containingFile?.text ?: "<no file>")
             }
             allValueArguments.last()
         } else {
@@ -745,7 +782,13 @@ class PSICallResolver(
             is DoubleColonLHS.Type -> {
                 val qualifiedExpression = ktExpression.receiverExpression!!
                 val qualifier = expressionTypingContext.trace.get(BindingContext.QUALIFIER, qualifiedExpression)
-                LHSResult.Type(qualifier, lhsResult.type.unwrap())
+                val classifier = lhsResult.type.constructor.declarationDescriptor
+                if (classifier !is ClassDescriptor) {
+                    expressionTypingContext.trace.report(Errors.CALLABLE_REFERENCE_LHS_NOT_A_CLASS.on(ktExpression))
+                    LHSResult.Error
+                } else {
+                    LHSResult.Type(qualifier, lhsResult.type.unwrap())
+                }
             }
         }
 

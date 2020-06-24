@@ -6,6 +6,7 @@
 package org.jetbrains.kotlin.fir.resolve.inference
 
 import org.jetbrains.kotlin.fir.declarations.FirAnonymousFunction
+import org.jetbrains.kotlin.fir.declarations.FirDeclarationOrigin
 import org.jetbrains.kotlin.fir.declarations.builder.buildValueParameter
 import org.jetbrains.kotlin.fir.expressions.FirExpression
 import org.jetbrains.kotlin.fir.expressions.FirFunctionCall
@@ -13,6 +14,7 @@ import org.jetbrains.kotlin.fir.expressions.FirResolvable
 import org.jetbrains.kotlin.fir.expressions.FirStatement
 import org.jetbrains.kotlin.fir.resolve.BodyResolveComponents
 import org.jetbrains.kotlin.fir.resolve.ResolutionMode
+import org.jetbrains.kotlin.fir.resolve.calls.FirNamedReferenceWithCandidate
 import org.jetbrains.kotlin.fir.resolve.calls.candidate
 import org.jetbrains.kotlin.fir.resolve.substitution.ConeSubstitutor
 import org.jetbrains.kotlin.fir.resolve.transformers.FirCallCompletionResultsWriterTransformer
@@ -50,24 +52,9 @@ class FirCallCompleter(
     fun <T> completeCall(call: T, expectedTypeRef: FirTypeRef?): CompletionResult<T>
             where T : FirResolvable, T : FirStatement {
         val typeRef = typeFromCallee(call)
-        if (typeRef.type is ConeKotlinErrorType) {
-            if (call is FirExpression) {
-                call.resultType = typeRef
-            }
-            val errorCall = if (call is FirFunctionCall) {
-                call.argumentList.transformArguments(
-                    transformer,
-                    ResolutionMode.WithExpectedType(typeRef.resolvedTypeFromPrototype(session.builtinTypes.nullableAnyType.type))
-                )
-                call
-            } else {
-                call
-            }
-            inferenceSession.addErrorCall(errorCall)
-            return CompletionResult(errorCall, true)
-        }
 
-        val candidate = call.candidate() ?: return CompletionResult(call, true)
+        val reference = call.calleeReference as? FirNamedReferenceWithCandidate ?: return CompletionResult(call, true)
+        val candidate = reference.candidate
         val initialSubstitutor = candidate.substitutor
 
         val initialType = initialSubstitutor.substituteOrSelf(typeRef.type)
@@ -118,6 +105,8 @@ class FirCallCompleter(
                 inferenceSession.addPartiallyResolvedCall(approximatedCall)
                 CompletionResult(approximatedCall, false)
             }
+
+            ConstraintSystemCompletionMode.UNTIL_FIRST_LAMBDA -> throw IllegalStateException()
         }
     }
 
@@ -159,6 +148,7 @@ class FirCallCompleter(
                     val itType = parameters.single()
                     buildValueParameter {
                         session = this@FirCallCompleter.session
+                        origin = FirDeclarationOrigin.Source
                         returnTypeRef = buildResolvedTypeRef { type = itType.approximateLambdaInputType() }
                         this.name = name
                         symbol = FirVariableSymbol(name)
@@ -188,11 +178,11 @@ class FirCallCompleter(
             lambdaArgument.replaceValueParameters(lambdaArgument.valueParameters + listOfNotNull(itParam))
             lambdaArgument.replaceReturnTypeRef(expectedReturnTypeRef ?: noExpectedType)
 
-            val localContext = localContextForAnonymousFunctions.getValue(lambdaArgument.symbol)
-            transformer.components.withLocalContext(localContext) {
+            val localContext = towerDataContextForAnonymousFunctions.getValue(lambdaArgument.symbol)
+            transformer.context.withTowerDataContext(localContext) {
                 lambdaArgument.transformSingle(transformer, ResolutionMode.LambdaResolution(expectedReturnTypeRef))
             }
-            dropContextForAnonymousFunction(lambdaArgument)
+            transformer.context.dropContextForAnonymousFunction(lambdaArgument)
 
             val returnArguments = dataFlowAnalyzer.returnExpressionsOfAnonymousFunction(lambdaArgument)
 

@@ -47,6 +47,7 @@ import org.jetbrains.kotlin.load.java.lazy.SingleModuleClassResolver
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.name.SpecialNames
+import org.jetbrains.kotlin.platform.CommonPlatforms
 import org.jetbrains.kotlin.platform.isCommon
 import org.jetbrains.kotlin.platform.jvm.JvmPlatforms
 import org.jetbrains.kotlin.psi.KtFile
@@ -271,7 +272,8 @@ abstract class AbstractDiagnosticsTest : BaseDiagnosticsTest() {
     private fun checkOriginalAndFirTestdataIdentity(testDataFile: File, firTestDataFile: File) {
         val originalTestData = loadTestDataWithoutDiagnostics(testDataFile)
         val firTestData = loadTestDataWithoutDiagnostics(firTestDataFile)
-        val message = "Original and fir test data doesn't identical. Please, add changes from ${testDataFile.name} to ${firTestDataFile.name}"
+        val message = "Original and fir test data aren't identical. " +
+                "Please, add changes from ${testDataFile.name} to ${firTestDataFile.name}"
         TestCase.assertEquals(message, originalTestData, firTestData)
     }
 
@@ -447,6 +449,7 @@ abstract class AbstractDiagnosticsTest : BaseDiagnosticsTest() {
         if (platform.isCommon()) {
             return CommonResolverForModuleFactory.analyzeFiles(
                 files, moduleDescriptor.name, true, languageVersionSettings,
+                CommonPlatforms.defaultCommonPlatform,
                 mapOf(
                     MODULE_FILES to files
                 )

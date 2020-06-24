@@ -11,6 +11,7 @@ import org.jetbrains.jps.model.java.JavaResourceRootType
 import org.jetbrains.jps.model.java.JavaSourceRootType
 import org.jetbrains.kotlin.config.*
 import org.jetbrains.kotlin.idea.codeInsight.gradle.MultiplePluginVersionGradleImportingTestCase
+import org.jetbrains.kotlin.konan.target.HostManager
 import org.jetbrains.kotlin.platform.CommonPlatforms
 import org.jetbrains.kotlin.platform.js.JsPlatforms
 import org.jetbrains.kotlin.platform.jvm.JvmPlatforms
@@ -254,7 +255,7 @@ class NewMultiplatformProjectImportingTest : MultiplePluginVersionGradleImportin
     }
 
     @Test
-    @PluginTargetVersions(gradleVersion = "4.0+", pluginVersion = "1.3.30+")
+    @PluginTargetVersions(gradleVersion = "5.0+", pluginVersion = "1.3.30+")
     fun testAndroidDependencyOnMPP() {
         configureByFiles()
         createProjectSubFile(
@@ -266,7 +267,6 @@ class NewMultiplatformProjectImportingTest : MultiplePluginVersionGradleImportin
         checkProjectStructure {
             module("project")
             module("app") {
-                libraryDependency("Gradle: android-android-26", DependencyScope.COMPILE)
                 libraryDependency("Gradle: android.arch.core:common:1.1.0@jar", DependencyScope.COMPILE)
                 libraryDependency("Gradle: android.arch.core:runtime:1.1.0@aar", DependencyScope.COMPILE)
                 libraryDependency("Gradle: android.arch.lifecycle:common:1.1.0@jar", DependencyScope.COMPILE)
@@ -427,7 +427,7 @@ class NewMultiplatformProjectImportingTest : MultiplePluginVersionGradleImportin
 
 
     @Test
-    @PluginTargetVersions(gradleVersion = "4.0+", pluginVersion = "1.3.50+")
+    @PluginTargetVersions(gradleVersion = "5.0+", pluginVersion = "1.3.50+")
     fun testSingleAndroidTarget() {
         configureByFiles()
         importProject()
@@ -612,7 +612,7 @@ class NewMultiplatformProjectImportingTest : MultiplePluginVersionGradleImportin
     }
 
     @Test
-    @PluginTargetVersions(gradleVersion = "4.0+", pluginVersion = "1.3.20+")
+    @PluginTargetVersions(gradleVersion = "5.0+", pluginVersion = "1.3.20+")
     fun testDetectAndroidSources() {
         configureByFiles()
         createProjectSubFile(
@@ -871,18 +871,97 @@ class NewMultiplatformProjectImportingTest : MultiplePluginVersionGradleImportin
         importProject(true)
         checkProjectStructure(true, false, false) {
             module("KotlinMPPL") {}
-            module("com.example.KotlinMPPL.commonMain") {
+            module("KotlinMPPL.commonMain") {
                 platform(CommonPlatforms.defaultCommonPlatform)
             }
-            module("com.example.KotlinMPPL.commonTest") {
+            module("KotlinMPPL.commonTest") {
                 platform(CommonPlatforms.defaultCommonPlatform)
             }
-            module("com.example.KotlinMPPL.jsMain") {
+            module("KotlinMPPL.jsMain") {
                 platform(JsPlatforms.defaultJsPlatform)
             }
-            module("com.example.KotlinMPPL.jsTest") {
+            module("KotlinMPPL.jsTest") {
                 platform(JsPlatforms.defaultJsPlatform)
             }
+        }
+    }
+
+    @Test
+    @PluginTargetVersions(gradleVersion = "4.0+", pluginVersion = "1.3.60+")
+    fun testIgnoreIncompatibleNativeTestTasks() {
+        configureByFiles()
+        importProject()
+
+        checkProjectStructure(exhaustiveSourceSourceRootList = false, exhaustiveDependencyList = false, exhaustiveTestsList = true) {
+            module("project")
+            module("project_commonMain") {
+
+            }
+            module("project_commonTest") {
+                externalSystemTestTask("jsBrowserTest", "project:jsTest", "js")
+                externalSystemTestTask("jsNodeTest", "project:jsTest", "js")
+                externalSystemTestTask("jvmTest", "project:jvmTest", "jvm")
+
+                when {
+                    HostManager.hostIsMac -> externalSystemTestTask("macosTest", "project:macosTest", "macos")
+                    HostManager.hostIsMingw -> externalSystemTestTask("winTest", "project:winTest", "win")
+                    HostManager.hostIsLinux -> externalSystemTestTask("linuxTest", "project:linuxTest", "linux")
+                }
+            }
+
+            module("project_jsMain")
+            module("project_jsTest") {
+                externalSystemTestTask("jsBrowserTest", "project:jsTest", "js")
+                externalSystemTestTask("jsNodeTest", "project:jsTest", "js")
+            }
+
+            module("project_jvmMain")
+            module("project_jvmTest") {
+                externalSystemTestTask("jvmTest", "project:jvmTest", "jvm")
+            }
+
+            module("project_macosMain") {
+            }
+            module("project_macosTest") {
+                if (HostManager.hostIsMac) externalSystemTestTask("macosTest", "project:macosTest", "macos")
+            }
+
+            module("project_winMain") {
+            }
+            module("project_winTest") {
+                if (HostManager.hostIsMingw) externalSystemTestTask("winTest", "project:winTest", "win")
+            }
+
+            module("project_linuxMain") {
+            }
+            module("project_linuxTest") {
+                if (HostManager.hostIsLinux) externalSystemTestTask("linuxTest", "project:linuxTest", "linux")
+            }
+        }
+    }
+
+
+    @Test
+    @PluginTargetVersions(gradleVersion = "4.0+", pluginVersion = "1.3.30+")
+    fun testMutableArtifactLists() {
+        configureByFiles()
+        importProject(true)
+        checkProjectStructure(true, false, false) {
+            module("KT38037") {}
+            module("KT38037.mpp-bottom-actual") {}
+            module("KT38037.mpp-bottom-actual.commonMain") {}
+            module("KT38037.mpp-bottom-actual.commonTest") {}
+            module("KT38037.mpp-bottom-actual.jvm18Main") {}
+            module("KT38037.mpp-bottom-actual.jvm18Test") {}
+            module("KT38037.mpp-bottom-actual.main") {}
+            module("KT38037.mpp-bottom-actual.test") {}
+            module("KT38037.mpp-mid-actual") {}
+            module("KT38037.mpp-mid-actual.commonMain") {}
+            module("KT38037.mpp-mid-actual.commonTest") {}
+            module("KT38037.mpp-mid-actual.jvmWithJavaMain") {}
+            module("KT38037.mpp-mid-actual.jvmWithJavaTest") {}
+            module("KT38037.mpp-mid-actual.main") {}
+            module("KT38037.mpp-mid-actual.test") {}
         }
     }
 

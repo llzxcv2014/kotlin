@@ -22,6 +22,7 @@ internal class FirResolvedFunctionTypeRefImpl(
     override val source: FirSourceElement?,
     override val annotations: MutableList<FirAnnotationCall>,
     override val type: ConeKotlinType,
+    override val isSuspend: Boolean,
     override val isMarkedNullable: Boolean,
     override var receiverTypeRef: FirTypeRef?,
     override val valueParameters: MutableList<FirValueParameter>,
@@ -37,10 +38,15 @@ internal class FirResolvedFunctionTypeRefImpl(
     }
 
     override fun <D> transformChildren(transformer: FirTransformer<D>, data: D): FirResolvedFunctionTypeRefImpl {
-        annotations.transformInplace(transformer, data)
+        transformAnnotations(transformer, data)
         receiverTypeRef = receiverTypeRef?.transformSingle(transformer, data)
         valueParameters.transformInplace(transformer, data)
         returnTypeRef = returnTypeRef.transformSingle(transformer, data)
+        return this
+    }
+
+    override fun <D> transformAnnotations(transformer: FirTransformer<D>, data: D): FirResolvedFunctionTypeRefImpl {
+        annotations.transformInplace(transformer, data)
         return this
     }
 }

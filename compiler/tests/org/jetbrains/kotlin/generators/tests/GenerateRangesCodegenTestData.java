@@ -18,7 +18,6 @@ package org.jetbrains.kotlin.generators.tests;
 
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.util.LineSeparator;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -70,6 +69,18 @@ public class GenerateRangesCodegenTestData {
 
     private static final Map<String, String> ELEMENT_TYPE_KNOWN_SUBSTRINGS = new HashMap<>();
     private static final Map<String, String> MIN_MAX_CONSTANTS = new LinkedHashMap<>();
+
+    private static final List<String> FIR_FAILING_UNSIGNED_LITERAL_TESTS =
+            Arrays.asList("inexactDownToMinValue", "inexactToMaxValue", "maxValueMinusTwoToMaxValue", "maxValueToMaxValue",
+                          "maxValueToMinValue", "overflowZeroDownToMaxValue", "overflowZeroToMinValue", "progressionDownToMinValue",
+                          "progressionMaxValueMinusTwoToMaxValue", "progressionMaxValueToMaxValue", "progressionMaxValueToMinValue",
+                          "progressionMinValueToMinValue");
+
+    private static final List<String> FIR_FAILING_UNSIGNED_EXPRESSION_TESTS = FIR_FAILING_UNSIGNED_LITERAL_TESTS;
+
+    private static final List<String> JVM_IR_FAILING_UNSIGNED_LITERAL_TESTS = Collections.emptyList();
+
+    private static final List<String> JVM_IR_FAILING_UNSIGNED_EXPRESSION_TESTS = Collections.emptyList();
 
     static {
         for (String integerType : INTEGER_PRIMITIVES) {
@@ -127,7 +138,7 @@ public class GenerateRangesCodegenTestData {
                 .replace("$LIST", "list" + number)
                 .replace("$RANGE", "range" + number)
                 .replace("$TYPE", elementType)
-                .replace("\n", LineSeparator.getSystemLineSeparator().getSeparatorString());
+                .replace("\n", System.lineSeparator());
     }
 
     private static void writeIgnoreBackendDirective(PrintWriter out, String backendName) {
@@ -135,7 +146,7 @@ public class GenerateRangesCodegenTestData {
         out.printf("// IGNORE_BACKEND: %s%n%n", backendName);
     }
 
-    private static void writeToFile(File file, String generatedBody, boolean isForUnsigned, boolean ignoreFrontendIR) {
+    private static void writeToFile(File file, String generatedBody, boolean isForUnsigned, boolean ignoreFrontendIR, boolean ignoreJvmIR) {
         PrintWriter out;
         try {
             //noinspection IOResourceOpenedButNotSafelyClosed
@@ -145,6 +156,9 @@ public class GenerateRangesCodegenTestData {
             throw new AssertionError(e);
         }
 
+        if (ignoreJvmIR) {
+            out.println("// IGNORE_BACKEND: JVM_IR");
+        }
         if (ignoreFrontendIR) {
             out.println("// IGNORE_BACKEND_FIR: JVM_IR");
         }
@@ -227,13 +241,14 @@ public class GenerateRangesCodegenTestData {
                     }
 
                     String fileName = testFunName + ".kt";
-                    boolean useFrontendIR =
-                            testFunName.equals("emptyDownto") || testFunName.equals("emptyRange") ||
-                            testFunName.equals("reversedEmptyRange") || testFunName.equals("reversedEmptyBackSequence");
-                    writeToFile(new File(AS_LITERAL_DIR, fileName), asLiteralBody.toString(), false, !useFrontendIR);
-                    writeToFile(new File(AS_EXPRESSION_DIR, fileName), asExpressionBody.toString(), false, !useFrontendIR);
-                    writeToFile(new File(UNSIGNED_AS_LITERAL_DIR, fileName), unsignedAsLiteralBody.toString(), true, true);
-                    writeToFile(new File(UNSIGNED_AS_EXPRESSION_DIR, fileName), unsignedAsExpressionBody.toString(), true, true);
+                    writeToFile(new File(AS_LITERAL_DIR, fileName), asLiteralBody.toString(), false, false, false);
+                    writeToFile(new File(AS_EXPRESSION_DIR, fileName), asExpressionBody.toString(), false, false, false);
+                    writeToFile(new File(UNSIGNED_AS_LITERAL_DIR, fileName), unsignedAsLiteralBody.toString(), true,
+                                FIR_FAILING_UNSIGNED_LITERAL_TESTS.contains(testFunName),
+                                JVM_IR_FAILING_UNSIGNED_LITERAL_TESTS.contains(testFunName));
+                    writeToFile(new File(UNSIGNED_AS_EXPRESSION_DIR, fileName), unsignedAsExpressionBody.toString(), true,
+                                FIR_FAILING_UNSIGNED_EXPRESSION_TESTS.contains(testFunName),
+                                JVM_IR_FAILING_UNSIGNED_EXPRESSION_TESTS.contains(testFunName));
                 }
             }
         }

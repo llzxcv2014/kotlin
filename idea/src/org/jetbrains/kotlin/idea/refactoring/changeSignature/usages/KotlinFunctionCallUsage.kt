@@ -42,6 +42,7 @@ import org.jetbrains.kotlin.psi.psiUtil.getParentOfTypeAndBranch
 import org.jetbrains.kotlin.psi.psiUtil.getQualifiedExpressionForSelector
 import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
 import org.jetbrains.kotlin.psi.psiUtil.startOffset
+import org.jetbrains.kotlin.resolve.DescriptorUtils
 import org.jetbrains.kotlin.resolve.calls.callUtil.getResolvedCall
 import org.jetbrains.kotlin.resolve.calls.model.*
 import org.jetbrains.kotlin.resolve.lazy.BodyResolveMode
@@ -304,11 +305,13 @@ class KotlinFunctionCallUsage(
             defaultValueForCall != null -> substituteReferences(defaultValueForCall, parameter.defaultValueParameterReferences, psiFactory)
             else -> null
         }
+
         val argName = (if (isInsideOfCallerBody) null else name)?.let { Name.identifier(it) }
         return psiFactory.createArgument(argValue ?: psiFactory.createExpression("0"), argName).apply {
-            generatedArgumentValue = true
             if (argValue == null) {
-                getArgumentExpression()!!.delete()
+                getArgumentExpression()?.delete()
+            } else {
+                generatedArgumentValue = true
             }
         }
     }
@@ -436,7 +439,9 @@ class KotlinFunctionCallUsage(
         }
 
         val oldArgumentList = element.valueArgumentList.sure { "Argument list is expected: " + element.text }
-        replaceListPsiAndKeepDelimiters(oldArgumentList, newArgumentList) { arguments }
+        for (argument in replaceListPsiAndKeepDelimiters(oldArgumentList, newArgumentList) { arguments }.arguments) {
+            if (argument.getArgumentExpression() == null) argument.delete()
+        }
 
         element.accept(
             object : KtTreeVisitorVoid() {
@@ -540,7 +545,11 @@ class KotlinFunctionCallUsage(
                 is ExpressionReceiver -> receiver.expression
                 is ImplicitReceiver -> {
                     val descriptor = receiver.declarationDescriptor
-                    val thisText = if (descriptor is ClassDescriptor) "this@" + descriptor.name.asString() else "this"
+                    val thisText = if (descriptor is ClassDescriptor && !DescriptorUtils.isAnonymousObject(descriptor)) {
+                        "this@" + descriptor.name.asString()
+                    } else {
+                        "this"
+                    }
                     psiFactory.createExpression(thisText)
                 }
                 else -> null

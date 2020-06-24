@@ -6,6 +6,7 @@
 package org.jetbrains.kotlin.ir.expressions
 
 import org.jetbrains.kotlin.descriptors.*
+import org.jetbrains.kotlin.ir.ObsoleteDescriptorBasedAPI
 import org.jetbrains.kotlin.ir.declarations.IrTypeParameter
 import org.jetbrains.kotlin.ir.declarations.IrFunction
 import org.jetbrains.kotlin.ir.declarations.IrValueParameter
@@ -80,6 +81,7 @@ fun IrMemberAccessExpression.removeValueArgument(valueParameterDescriptor: Value
     removeValueArgument(valueParameterDescriptor.index)
 }
 
+@ObsoleteDescriptorBasedAPI
 inline fun <T : IrMemberAccessExpression> T.mapTypeParameters(transform: (TypeParameterDescriptor) -> IrType) : T =
     apply {
         val descriptor = symbol.descriptor as CallableDescriptor
@@ -88,6 +90,7 @@ inline fun <T : IrMemberAccessExpression> T.mapTypeParameters(transform: (TypePa
         }
     }
 
+@ObsoleteDescriptorBasedAPI
 inline fun <T : IrMemberAccessExpression> T.mapValueParameters(transform: (ValueParameterDescriptor) -> IrExpression?): T =
     apply {
         val descriptor = symbol.descriptor as CallableDescriptor
@@ -96,6 +99,7 @@ inline fun <T : IrMemberAccessExpression> T.mapValueParameters(transform: (Value
         }
     }
 
+@ObsoleteDescriptorBasedAPI
 inline fun <T : IrMemberAccessExpression> T.mapValueParametersIndexed(transform: (Int, ValueParameterDescriptor) -> IrExpression?): T =
     apply {
         val descriptor = symbol.descriptor as CallableDescriptor

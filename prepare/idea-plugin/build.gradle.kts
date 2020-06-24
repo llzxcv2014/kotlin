@@ -39,18 +39,19 @@ val projectsToShadow by extra(listOf(
         ":idea:scripting-support",
         ":idea:idea-j2k",
         ":idea:formatter",
-        ":libraries:tools:new-project-wizard",
-        ":idea:idea-new-project-wizard",
-        ":libraries:tools:new-project-wizard:new-project-wizard-cli",
+        ":idea:line-indent-provider",
         ":compiler:psi",
         ":compiler:fir:cones",
         ":compiler:fir:checkers",
         ":compiler:fir:resolve",
+        ":compiler:fir:fir-serialization",
         ":compiler:fir:tree",
         ":compiler:fir:java",
         ":compiler:fir:jvm",
-        ":compiler:fir:psi2fir",
+        ":compiler:fir:raw-fir:psi2fir",
+        ":compiler:fir:raw-fir:fir-common",
         ":compiler:fir:fir2ir",
+        ":compiler:fir:fir2ir:jvm-backend",
         ":compiler:frontend",
         ":compiler:frontend.common",
         ":compiler:frontend.java",
@@ -64,6 +65,7 @@ val projectsToShadow by extra(listOf(
         ":js:js.ast",
         ":js:js.frontend",
         ":js:js.parser",
+        ":js:js.config",
         ":js:js.serializer",
         ":js:js.translator",
         ":native:kotlin-native-utils",
@@ -75,6 +77,8 @@ val projectsToShadow by extra(listOf(
         ":compiler:resolution",
         ":compiler:serialization",
         ":compiler:util",
+        ":compiler:config",
+        ":compiler:config.jvm",
         ":compiler:compiler.version",
         ":core:util.runtime",
         ":plugins:lint",
@@ -90,8 +94,18 @@ val projectsToShadow by extra(listOf(
         ":idea:idea-jvm",
         ":idea:idea-git",
         ":idea:idea-jps-common",
+        ":idea:idea-frontend-independent",
+        ":idea:idea-frontend-fir",
+        ":idea:idea-frontend-api",
+        ":idea:idea-frontend-fir:idea-fir-low-level-api",
+        ":idea:idea-fir",
         *if (Ide.IJ())
-            arrayOf(":idea:idea-maven")
+            arrayOf(
+                ":idea:idea-maven",
+                ":libraries:tools:new-project-wizard",
+                ":idea:idea-new-project-wizard",
+                ":libraries:tools:new-project-wizard:new-project-wizard-cli"
+            )
         else
             emptyArray<String>()
 ))
@@ -129,7 +143,11 @@ val libraries by configurations.creating {
     exclude("org.jetbrains.intellij.deps", "trove4j") // Idea already has trove4j
 }
 
-val jpsPlugin by configurations.creating
+val jpsPlugin by configurations.creating {
+    attributes {
+        attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements.JAR))
+    }
+}
 
 configurations.all {
     resolutionStrategy {
@@ -144,7 +162,7 @@ dependencies {
     embedded(protobufFull())
     embedded(kotlinBuiltins())
 
-    libraries(commonDep("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.2"))
+    libraries(commonDep("org.jetbrains.kotlinx:kotlinx-collections-immutable-jvm:${property("versions.kotlinx-collections-immutable")}"))
     libraries(commonDep("javax.inject"))
     libraries(commonDep("org.jetbrains.kotlinx", "kotlinx-coroutines-jdk8"))
     libraries(commonDep("org.jetbrains", "markdown"))

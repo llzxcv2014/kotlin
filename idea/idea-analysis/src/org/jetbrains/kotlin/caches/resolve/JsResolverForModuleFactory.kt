@@ -5,8 +5,8 @@
 
 package org.jetbrains.kotlin.caches.resolve
 
+import com.intellij.openapi.diagnostic.Logger
 import org.jetbrains.kotlin.analyzer.*
-import org.jetbrains.kotlin.builtins.DefaultBuiltIns
 import org.jetbrains.kotlin.config.LanguageVersionSettings
 import org.jetbrains.kotlin.container.StorageComponentContainer
 import org.jetbrains.kotlin.container.get
@@ -15,21 +15,20 @@ import org.jetbrains.kotlin.descriptors.PackageFragmentProvider
 import org.jetbrains.kotlin.descriptors.impl.CompositePackageFragmentProvider
 import org.jetbrains.kotlin.descriptors.impl.ModuleDescriptorImpl
 import org.jetbrains.kotlin.frontend.di.createContainerForLazyResolve
-import org.jetbrains.kotlin.idea.klib.getCompatibilityInfo
 import org.jetbrains.kotlin.incremental.components.LookupTracker
 import org.jetbrains.kotlin.js.resolve.JsPlatformAnalyzerServices
-import org.jetbrains.kotlin.konan.util.KlibMetadataFactories
-import org.jetbrains.kotlin.library.metadata.parseModuleHeader
+import org.jetbrains.kotlin.platform.idePlatformKind
+import org.jetbrains.kotlin.platform.js.JsPlatforms
 import org.jetbrains.kotlin.resolve.BindingTraceContext
-import org.jetbrains.kotlin.resolve.CompilerDeserializationConfiguration
 import org.jetbrains.kotlin.resolve.TargetEnvironment
 import org.jetbrains.kotlin.resolve.lazy.ResolveSession
 import org.jetbrains.kotlin.resolve.lazy.declarations.DeclarationProviderFactoryService
-import org.jetbrains.kotlin.serialization.js.DynamicTypeDeserializer
 import org.jetbrains.kotlin.serialization.js.KotlinJavascriptSerializationUtil
 import org.jetbrains.kotlin.serialization.js.createKotlinJavascriptPackageFragmentProvider
-import org.jetbrains.kotlin.serialization.konan.impl.KlibMetadataModuleDescriptorFactoryImpl
 import org.jetbrains.kotlin.utils.KotlinJavascriptMetadataUtils
+import java.io.File
+
+private val LOG = Logger.getInstance(JsResolverForModuleFactory::class.java)
 
 class JsResolverForModuleFactory(
     private val targetEnvironment: TargetEnvironment
@@ -79,38 +78,26 @@ internal fun <M : ModuleInfo> createPackageFragmentProvider(
     moduleDescriptor: ModuleDescriptorImpl
 ): List<PackageFragmentProvider> = when (moduleInfo) {
     is JsKlibLibraryInfo -> {
-        val library = moduleInfo.kotlinLibrary
-
-        if (library.getCompatibilityInfo().isCompatible) {
-            val metadataFactories = KlibMetadataFactories({ DefaultBuiltIns.Instance }, DynamicTypeDeserializer)
-
-            val klibMetadataModuleDescriptorFactory = KlibMetadataModuleDescriptorFactoryImpl(
-                metadataFactories.DefaultDescriptorFactory,
-                metadataFactories.DefaultPackageFragmentsFactory,
-                metadataFactories.flexibleTypeDeserializer,
-                metadataFactories.platformDependentTypeTransformer
+        listOfNotNull(
+            JsPlatforms.defaultJsPlatform.idePlatformKind.resolution.createKlibPackageFragmentProvider(
+                moduleInfo,
+                moduleContext.storageManager,
+                container.get<LanguageVersionSettings>(),
+                moduleDescriptor
             )
-
-            val packageFragmentNames = parseModuleHeader(library.moduleHeaderData).packageFragmentNameList
-
-            val klibBasedPackageFragmentProvider = klibMetadataModuleDescriptorFactory.createPackageFragmentProvider(
-                library,
-                packageAccessHandler = null,
-                packageFragmentNames = packageFragmentNames,
-                storageManager = moduleContext.storageManager,
-                moduleDescriptor = moduleDescriptor,
-                configuration = CompilerDeserializationConfiguration(container.get()),
-                compositePackageFragmentAddend = null
-            )
-
-            listOf(klibBasedPackageFragmentProvider)
-        } else {
-            emptyList()
-        }
+        )
     }
     is LibraryModuleInfo -> {
         moduleInfo.getLibraryRoots()
-            .flatMap { KotlinJavascriptMetadataUtils.loadMetadata(it) }
+            .flatMap {
+                if (File(it).exists()) {
+                    KotlinJavascriptMetadataUtils.loadMetadata(it)
+                } else {
+                    // TODO can/should we warn a user about a problem in a library root? If so how?
+                    LOG.error("Library $it not found")
+                    emptyList()
+                }
+            }
             .filter { it.version.isCompatible() }
             .map { metadata ->
                 val (header, packageFragmentProtos) =

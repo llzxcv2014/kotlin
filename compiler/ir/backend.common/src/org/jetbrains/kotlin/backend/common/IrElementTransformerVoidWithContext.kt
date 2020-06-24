@@ -16,6 +16,7 @@
 
 package org.jetbrains.kotlin.backend.common
 
+import org.jetbrains.kotlin.ir.ObsoleteDescriptorBasedAPI
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.builders.Scope
@@ -99,8 +100,9 @@ abstract class IrElementTransformerVoidWithContext : IrElementTransformerVoid() 
     protected val currentScope get() = scopeStack.peek()
     protected val parentScope get() = if (scopeStack.size < 2) null else scopeStack[scopeStack.size - 2]
     protected val allScopes get() = scopeStack
-    protected val currentDeclarationParent get() = allScopes.last { it.irElement is IrDeclarationParent }.irElement as IrDeclarationParent
+    protected val currentDeclarationParent get() = scopeStack.lastOrNull { it.irElement is IrDeclarationParent }?.irElement as? IrDeclarationParent
 
+    @ObsoleteDescriptorBasedAPI
     fun printScopeStack() {
         scopeStack.forEach { println(it.scope.scopeOwner) }
     }
@@ -138,6 +140,7 @@ abstract class IrElementTransformerVoidWithContext : IrElementTransformerVoid() 
     }
 }
 
+@OptIn(ObsoleteDescriptorBasedAPI::class)
 abstract class IrElementVisitorVoidWithContext : IrElementVisitorVoid {
 
     private val scopeStack = mutableListOf<ScopeWithIr>()
@@ -198,6 +201,7 @@ abstract class IrElementVisitorVoidWithContext : IrElementVisitorVoid {
     protected val parentScope get() = if (scopeStack.size < 2) null else scopeStack[scopeStack.size - 2]
     protected val allScopes get() = scopeStack
 
+    @ObsoleteDescriptorBasedAPI
     fun printScopeStack() {
         scopeStack.forEach { println(it.scope.scopeOwner) }
     }

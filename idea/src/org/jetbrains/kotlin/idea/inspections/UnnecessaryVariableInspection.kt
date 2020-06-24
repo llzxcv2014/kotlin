@@ -51,7 +51,7 @@ class UnnecessaryVariableInspection : AbstractApplicabilityBasedInspection<KtPro
         else -> ""
     }
 
-    override val defaultFixText = KotlinBundle.message("inline.variable")
+    override val defaultFixText get() = KotlinBundle.message("inline.variable")
 
     override val startFixInWriteAction = false
 
@@ -90,6 +90,11 @@ class UnnecessaryVariableInspection : AbstractApplicabilityBasedInspection<KtPro
                             )
                         )
                         if (!validator(copyName)) return false
+                        if (containingDeclaration is KtClassOrObject) {
+                            val enclosingBlock = enclosingElement as? KtBlockExpression
+                            val initializerDeclaration = DescriptorToSourceUtils.descriptorToDeclaration(initializerDescriptor)
+                            if (enclosingBlock?.statements?.none { it == initializerDeclaration } == true) return false
+                        }
                     }
                     return true
                 }

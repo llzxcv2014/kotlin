@@ -10,24 +10,16 @@ import org.jetbrains.kotlin.konan.properties.Properties
 import org.jetbrains.kotlin.konan.properties.keepOnlyDefaultProfiles
 import org.jetbrains.kotlin.konan.properties.loadProperties
 import org.jetbrains.kotlin.konan.util.DependencyDirectories
+import org.jetbrains.kotlin.konan.util.visibleName
 
 class Distribution(
-    private val onlyDefaultProfiles: Boolean = false,
-    private val konanHomeOverride: String? = null,
-    private val runtimeFileOverride: String? = null
+        val konanHome: String,
+        private val onlyDefaultProfiles: Boolean = false,
+        private val runtimeFileOverride: String? = null
 ) {
 
     val localKonanDir = DependencyDirectories.localKonanDir
 
-    private fun findKonanHome(): String {
-        if (konanHomeOverride != null) return konanHomeOverride
-
-        val value = System.getProperty("konan.home", "dist")
-        val path = File(value).absolutePath
-        return path
-    }
-
-    val konanHome = findKonanHome()
     val konanSubdir = "$konanHome/konan"
     val mainPropertyFileName = "$konanSubdir/konan.properties"
     val experimentalEnabled by lazy {
@@ -90,14 +82,21 @@ class Distribution(
 
     fun runtime(target: KonanTarget) = runtimeFileOverride ?: "$stdlibDefaultComponent/targets/${target.visibleName}/native/runtime.bc"
 
+    fun platformDefs(target: KonanTarget) = "$konanHome/konan/platformDef/${target.visibleName}"
+
+    fun platformLibs(target: KonanTarget) = "$klib/platform/${target.visibleName}"
+
     val launcherFiles = listOf("launcher.bc")
 
     val dependenciesDir = DependencyDirectories.defaultDependenciesRoot.absolutePath
 
-    fun availableSubTarget(genericName: String) =
-        additionalPropertyFiles(genericName).map { it.name }
+    val subTargetProvider = object: SubTargetProvider {
+        override fun availableSubTarget(genericName: String) =
+                additionalPropertyFiles(genericName).map { it.name }
+    }
 }
 
-fun buildDistribution(konanHomeOverride: String? = null) = Distribution(true, konanHomeOverride, null)
+// TODO: Move into K/N?
+fun buildDistribution(konanHome: String) = Distribution(konanHome,true, null)
 
-fun customerDistribution(konanHomeOverride: String? = null) = Distribution(false, konanHomeOverride, null)
+fun customerDistribution(konanHome: String) = Distribution(konanHome,false, null)

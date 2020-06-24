@@ -14,8 +14,8 @@ import org.jetbrains.kotlin.fir.builder.FirBuilderDsl
 import org.jetbrains.kotlin.fir.declarations.FirRegularClass
 import org.jetbrains.kotlin.fir.declarations.FirTypeParameter
 import org.jetbrains.kotlin.fir.declarations.FirValueParameter
+import org.jetbrains.kotlin.fir.diagnostics.ConeSimpleDiagnostic
 import org.jetbrains.kotlin.fir.diagnostics.DiagnosticKind
-import org.jetbrains.kotlin.fir.diagnostics.FirSimpleDiagnostic
 import org.jetbrains.kotlin.fir.expressions.*
 import org.jetbrains.kotlin.fir.expressions.builder.*
 import org.jetbrains.kotlin.fir.java.declarations.buildJavaValueParameter
@@ -24,13 +24,13 @@ import org.jetbrains.kotlin.fir.references.builder.buildErrorNamedReference
 import org.jetbrains.kotlin.fir.references.builder.buildResolvedNamedReference
 import org.jetbrains.kotlin.fir.resolve.defaultType
 import org.jetbrains.kotlin.fir.resolve.firSymbolProvider
-import org.jetbrains.kotlin.fir.resolve.getClassDeclaredCallableSymbols
+import org.jetbrains.kotlin.fir.resolve.providers.getClassDeclaredCallableSymbols
 import org.jetbrains.kotlin.fir.resolve.toSymbol
 import org.jetbrains.kotlin.fir.resolve.transformers.body.resolve.firUnsafe
 import org.jetbrains.kotlin.fir.symbols.StandardClassIds
 import org.jetbrains.kotlin.fir.symbols.impl.ConeClassLikeLookupTagImpl
 import org.jetbrains.kotlin.fir.symbols.impl.FirRegularClassSymbol
-import org.jetbrains.kotlin.fir.toFirSourceElement
+import org.jetbrains.kotlin.fir.toFirPsiSourceElement
 import org.jetbrains.kotlin.fir.types.*
 import org.jetbrains.kotlin.fir.types.builder.buildResolvedTypeRef
 import org.jetbrains.kotlin.fir.types.impl.ConeClassLikeTypeImpl
@@ -123,20 +123,7 @@ internal fun JavaType?.toConeKotlinTypeWithoutEnhancement(
             classId.toConeKotlinType(emptyArray(), isNullable = false)
         }
         is JavaArrayType -> {
-            val componentType = componentType
-            if (componentType !is JavaPrimitiveType) {
-                val classId = StandardClassIds.Array
-                val argumentType = componentType.toConeKotlinTypeWithoutEnhancement(session, javaTypeParameterStack)
-                classId.toConeFlexibleType(
-                    arrayOf(argumentType),
-                    typeArgumentsForUpper = arrayOf(ConeKotlinTypeProjectionOut(argumentType))
-                )
-            } else {
-                val javaComponentName = componentType.type?.typeName?.asString()?.capitalize() ?: error("Array of voids")
-                val classId = StandardClassIds.byName(javaComponentName + "Array")
-
-                classId.toConeFlexibleType(emptyArray())
-            }
+            toConeKotlinTypeWithoutEnhancement(session, javaTypeParameterStack)
         }
         is JavaWildcardType -> bound?.toConeKotlinTypeWithoutEnhancement(session, javaTypeParameterStack) ?: run {
             StandardClassIds.Any.toConeFlexibleType(emptyArray())
@@ -145,6 +132,26 @@ internal fun JavaType?.toConeKotlinTypeWithoutEnhancement(
             StandardClassIds.Any.toConeFlexibleType(emptyArray())
         }
         else -> error("Strange JavaType: ${this::class.java}")
+    }
+}
+
+private fun JavaArrayType.toConeKotlinTypeWithoutEnhancement(
+    session: FirSession,
+    javaTypeParameterStack: JavaTypeParameterStack
+): ConeFlexibleType {
+    val componentType = componentType
+    return if (componentType !is JavaPrimitiveType) {
+        val classId = StandardClassIds.Array
+        val argumentType = componentType.toConeKotlinTypeWithoutEnhancement(session, javaTypeParameterStack)
+        classId.toConeFlexibleType(
+            arrayOf(argumentType),
+            typeArgumentsForUpper = arrayOf(ConeKotlinTypeProjectionOut(argumentType))
+        )
+    } else {
+        val javaComponentName = componentType.type?.typeName?.asString()?.capitalize() ?: error("Array of voids")
+        val classId = StandardClassIds.byName(javaComponentName + "Array")
+
+        classId.toConeFlexibleType(emptyArray())
     }
 }
 
@@ -318,7 +325,7 @@ private fun JavaClassifierType.toConeKotlinTypeForFlexibleBound(
 private fun FirRegularClass.createRawArguments(
     defaultArgs: List<ConeStarProjection>,
     position: TypeComponentPosition
-) = typeParameters.map { typeParameter ->
+) = typeParameters.filterIsInstance<FirTypeParameter>().map { typeParameter ->
     val erasedUpperBound = typeParameter.getErasedUpperBound {
         defaultType().withArguments(defaultArgs.toTypedArray())
     }
@@ -353,7 +360,7 @@ internal fun JavaValueParameter.toFirValueParameter(
     session: FirSession, index: Int, javaTypeParameterStack: JavaTypeParameterStack
 ): FirValueParameter {
     return buildJavaValueParameter {
-        source = (this@toFirValueParameter as? JavaElementImpl<*>)?.psi?.toFirSourceElement()
+        source = (this@toFirValueParameter as? JavaElementImpl<*>)?.psi?.toFirPsiSourceElement()
         this.session = session
         name = this@toFirValueParameter.name ?: Name.identifier("p$index")
         returnTypeRef = type.toFirJavaTypeRef(session, javaTypeParameterStack)
@@ -385,6 +392,7 @@ private fun JavaType?.toConeProjectionWithoutEnhancement(
             }
         }
         is JavaClassifierType -> toConeKotlinTypeWithoutEnhancement(session, javaTypeParameterStack)
+        is JavaArrayType -> toConeKotlinTypeWithoutEnhancement(session, javaTypeParameterStack)
         else -> ConeClassErrorType("Unexpected type argument: $this")
     }
 }
@@ -423,7 +431,7 @@ private fun JavaAnnotationArgument.toFirExpression(
                 }
                 this.calleeReference = calleeReference
                     ?: buildErrorNamedReference {
-                        diagnostic = FirSimpleDiagnostic("Strange Java enum value: $classId.$entryName", DiagnosticKind.Java)
+                        diagnostic = ConeSimpleDiagnostic("Strange Java enum value: $classId.$entryName", DiagnosticKind.Java)
                     }
             }
         }
@@ -437,7 +445,7 @@ private fun JavaAnnotationArgument.toFirExpression(
         }
         is JavaAnnotationAsAnnotationArgument -> getAnnotation().toFirAnnotationCall(session, javaTypeParameterStack)
         else -> buildErrorExpression {
-            diagnostic = FirSimpleDiagnostic("Unknown JavaAnnotationArgument: ${this::class.java}", DiagnosticKind.Java)
+            diagnostic = ConeSimpleDiagnostic("Unknown JavaAnnotationArgument: ${this::class.java}", DiagnosticKind.Java)
         }
     }
 }
@@ -475,7 +483,7 @@ internal fun Any?.createConstant(session: FirSession): FirExpression {
         null -> buildConstExpression(null, FirConstKind.Null, null)
 
         else -> buildErrorExpression {
-            diagnostic = FirSimpleDiagnostic("Unknown value in JavaLiteralAnnotationArgument: $this", DiagnosticKind.Java)
+            diagnostic = ConeSimpleDiagnostic("Unknown value in JavaLiteralAnnotationArgument: $this", DiagnosticKind.Java)
         }
     }
 }

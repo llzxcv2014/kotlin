@@ -8,6 +8,9 @@ package org.jetbrains.kotlin.ir.backend.js
 import org.jetbrains.kotlin.backend.common.*
 import org.jetbrains.kotlin.backend.common.lower.*
 import org.jetbrains.kotlin.backend.common.lower.inline.FunctionInlining
+import org.jetbrains.kotlin.backend.common.lower.inline.LocalClassesExtractionFromInlineFunctionsLowering
+import org.jetbrains.kotlin.backend.common.lower.inline.LocalClassesInInlineFunctionsLowering
+import org.jetbrains.kotlin.backend.common.lower.inline.LocalClassesInInlineLambdasLowering
 import org.jetbrains.kotlin.backend.common.lower.loops.ForLoopsLowering
 import org.jetbrains.kotlin.backend.common.lower.optimizations.FoldConstantLowering
 import org.jetbrains.kotlin.backend.common.lower.optimizations.PropertyAccessorInlineLowering
@@ -156,6 +159,12 @@ private val lateinitUsageLoweringPhase = makeBodyLoweringPhase(
     description = "Insert checks for lateinit field references"
 )
 
+private val kotlinNothingValueExceptionPhase = makeBodyLoweringPhase(
+    ::KotlinNothingValueExceptionLowering,
+    name = "KotlinNothingValueException",
+    description = "Throw proper exception for calls returning value of type 'kotlin.Nothing'"
+)
+
 private val stripTypeAliasDeclarationsPhase = makeDeclarationTransformerPhase(
     { StripTypeAliasDeclarationsLowering() },
     name = "StripTypeAliasDeclarations",
@@ -168,11 +177,40 @@ private val arrayConstructorPhase = makeBodyLoweringPhase(
     description = "Transform `Array(size) { index -> value }` into a loop"
 )
 
+private val sharedVariablesLoweringPhase = makeBodyLoweringPhase(
+    ::SharedVariablesLowering,
+    name = "SharedVariablesLowering",
+    description = "Box captured mutable variables",
+    prerequisite = setOf(lateinitDeclarationLoweringPhase, lateinitUsageLoweringPhase)
+)
+
+private val localClassesInInlineLambdasPhase = makeBodyLoweringPhase(
+    ::LocalClassesInInlineLambdasLowering,
+    name = "LocalClassesInInlineLambdasPhase",
+    description = "Extract local classes from inline lambdas"
+)
+
+private val localClassesInInlineFunctionsPhase = makeBodyLoweringPhase(
+    ::LocalClassesInInlineFunctionsLowering,
+    name = "LocalClassesInInlineFunctionsPhase",
+    description = "Extract local classes from inline functions"
+)
+
+private val localClassesExtractionFromInlineFunctionsPhase = makeBodyLoweringPhase(
+    ::LocalClassesExtractionFromInlineFunctionsLowering,
+    name = "localClassesExtractionFromInlineFunctionsPhase",
+    description = "Move local classes from inline functions into nearest declaration container",
+    prerequisite = setOf(localClassesInInlineFunctionsPhase)
+)
+
 private val functionInliningPhase = makeBodyLoweringPhase(
     ::FunctionInlining,
     name = "FunctionInliningPhase",
     description = "Perform function inlining",
-    prerequisite = setOf(expectDeclarationsRemovingPhase)
+    prerequisite = setOf(
+        expectDeclarationsRemovingPhase, sharedVariablesLoweringPhase,
+        localClassesInInlineLambdasPhase, localClassesExtractionFromInlineFunctionsPhase
+    )
 )
 
 private val copyInlineFunctionBodyLoweringPhase = makeDeclarationTransformerPhase(
@@ -190,7 +228,14 @@ private val removeInlineFunctionsWithReifiedTypeParametersLoweringPhase = makeDe
 )
 
 private val throwableSuccessorsLoweringPhase = makeBodyLoweringPhase(
-    ::ThrowableLowering,
+    { context ->
+        context.run {
+            val extendThrowableSymbol =
+                if (es6mode) setPropertiesToThrowableInstanceSymbol else extendThrowableSymbol
+
+            ThrowableLowering(this, extendThrowableSymbol)
+        }
+    },
     name = "ThrowableLowering",
     description = "Link kotlin.Throwable and JavaScript Error together to provide proper interop between language and platform exceptions"
 )
@@ -261,12 +306,6 @@ private val enumEntryRemovalLoweringPhase = makeDeclarationTransformerPhase(
     name = "EnumEntryRemovalLowering",
     description = "Replace enum entry with corresponding class",
     prerequisite = setOf(enumUsageLoweringPhase)
-)
-
-private val sharedVariablesLoweringPhase = makeBodyLoweringPhase(
-    ::SharedVariablesLowering,
-    name = "SharedVariablesLowering",
-    description = "Box captured mutable variables"
 )
 
 private val callableReferenceLowering = makeBodyLoweringPhase(
@@ -485,6 +524,19 @@ private val typeOperatorLoweringPhase = makeBodyLoweringPhase(
     )
 )
 
+private val es6AddInternalParametersToConstructorPhase = makeBodyLoweringPhase(
+    ::ES6AddInternalParametersToConstructorPhase,
+    name = "ES6CreateInitFunctionPhase",
+    description = "Add `box` and `resultType` params, create init functions for constructors"
+)
+
+private val es6ConstructorLowering = makeBodyLoweringPhase(
+    ::ES6ConstructorLowering,
+    name = "ES6ConstructorLoweringPhase",
+    description = "Lower constructors",
+    prerequisite = setOf(es6AddInternalParametersToConstructorPhase)
+)
+
 private val secondaryConstructorLoweringPhase = makeDeclarationTransformerPhase(
     ::SecondaryConstructorLowering,
     name = "SecondaryConstructorLoweringPhase",
@@ -572,6 +624,12 @@ private val objectUsageLoweringPhase = makeBodyLoweringPhase(
     description = "Transform IrGetObjectValue into instance generator call"
 )
 
+private val captureStackTraceInThrowablesPhase = makeBodyLoweringPhase(
+    ::CaptureStackTraceInThrowables,
+    name = "CaptureStackTraceInThrowables",
+    description = "Capture stack trace in Throwable constructors"
+)
+
 private val cleanupLoweringPhase = makeBodyLoweringPhase(
     { CleanupLowering() },
     name = "CleanupLowering",
@@ -585,18 +643,21 @@ val loweringList = listOf<Lowering>(
     expectDeclarationsRemovingPhase,
     stripTypeAliasDeclarationsPhase,
     arrayConstructorPhase,
+    lateinitNullableFieldsPhase,
+    lateinitDeclarationLoweringPhase,
+    lateinitUsageLoweringPhase,
+    sharedVariablesLoweringPhase,
+    localClassesInInlineLambdasPhase,
+    localClassesInInlineFunctionsPhase,
+    localClassesExtractionFromInlineFunctionsPhase,
     functionInliningPhase,
     copyInlineFunctionBodyLoweringPhase,
     createScriptFunctionsPhase,
     callableReferenceLowering,
     singleAbstractMethodPhase,
-    lateinitNullableFieldsPhase,
-    lateinitDeclarationLoweringPhase,
-    lateinitUsageLoweringPhase,
     tailrecLoweringPhase,
     enumClassConstructorLoweringPhase,
     enumClassConstructorBodyLoweringPhase,
-    sharedVariablesLoweringPhase,
     localDelegatedPropertiesLoweringPhase,
     localDeclarationsLoweringPhase,
     localClassExtractionPhase,
@@ -609,6 +670,7 @@ val loweringList = listOf<Lowering>(
     annotationConstructorLowering,
     initializersLoweringPhase,
     initializersCleanupLoweringPhase,
+    kotlinNothingValueExceptionPhase,
     // Common prefix ends
     enumEntryInstancesLoweringPhase,
     enumEntryInstancesBodyLoweringPhase,
@@ -648,6 +710,88 @@ val loweringList = listOf<Lowering>(
     constLoweringPhase,
     objectDeclarationLoweringPhase,
     objectUsageLoweringPhase,
+    captureStackTraceInThrowablesPhase,
+    callsLoweringPhase,
+    cleanupLoweringPhase,
+    validateIrAfterLowering
+)
+
+val es6LoweringList = listOf<Lowering>(
+    scriptRemoveReceiverLowering,
+    validateIrBeforeLowering,
+    testGenerationPhase,
+    expectDeclarationsRemovingPhase,
+    stripTypeAliasDeclarationsPhase,
+    arrayConstructorPhase,
+    lateinitNullableFieldsPhase,
+    lateinitDeclarationLoweringPhase,
+    lateinitUsageLoweringPhase,
+    sharedVariablesLoweringPhase,
+    localClassesInInlineLambdasPhase,
+    localClassesInInlineFunctionsPhase,
+    localClassesExtractionFromInlineFunctionsPhase,
+    functionInliningPhase,
+    copyInlineFunctionBodyLoweringPhase,
+    createScriptFunctionsPhase,
+    callableReferenceLowering,
+    singleAbstractMethodPhase,
+    tailrecLoweringPhase,
+    enumClassConstructorLoweringPhase,
+    enumClassConstructorBodyLoweringPhase,
+    localDelegatedPropertiesLoweringPhase,
+    localDeclarationsLoweringPhase,
+    localClassExtractionPhase,
+    innerClassesLoweringPhase,
+    innerClassesMemberBodyLoweringPhase,
+    innerClassConstructorCallsLoweringPhase,
+    propertiesLoweringPhase,
+    primaryConstructorLoweringPhase,
+    delegateToPrimaryConstructorLoweringPhase,
+    annotationConstructorLowering,
+    initializersLoweringPhase,
+    initializersCleanupLoweringPhase,
+    kotlinNothingValueExceptionPhase,
+    // Common prefix ends
+    enumEntryInstancesLoweringPhase,
+    enumEntryInstancesBodyLoweringPhase,
+    enumClassCreateInitializerLoweringPhase,
+    enumEntryCreateGetInstancesFunsLoweringPhase,
+    enumSyntheticFunsLoweringPhase,
+    enumUsageLoweringPhase,
+    enumEntryRemovalLoweringPhase,
+    suspendFunctionsLoweringPhase,
+    propertyReferenceLoweringPhase,
+    interopCallableReferenceLoweringPhase,
+    returnableBlockLoweringPhase,
+    forLoopsLoweringPhase,
+    primitiveCompanionLoweringPhase,
+    propertyAccessorInlinerLoweringPhase,
+    foldConstantLoweringPhase,
+    privateMembersLoweringPhase,
+    privateMemberUsagesLoweringPhase,
+    defaultArgumentStubGeneratorPhase,
+    defaultArgumentPatchOverridesPhase,
+    defaultParameterInjectorPhase,
+    defaultParameterCleanerPhase,
+    jsDefaultCallbackGeneratorPhase,
+    removeInlineFunctionsWithReifiedTypeParametersLoweringPhase,
+    throwableSuccessorsLoweringPhase,
+    es6AddInternalParametersToConstructorPhase,
+    es6ConstructorLowering,
+    varargLoweringPhase,
+    multipleCatchesLoweringPhase,
+    bridgesConstructionPhase,
+    typeOperatorLoweringPhase,
+    secondaryFactoryInjectorLoweringPhase,
+    classReferenceLoweringPhase,
+    inlineClassDeclarationLoweringPhase,
+    inlineClassUsageLoweringPhase,
+    autoboxingTransformerPhase,
+    blockDecomposerLoweringPhase,
+    constLoweringPhase,
+    objectDeclarationLoweringPhase,
+    objectUsageLoweringPhase,
+    captureStackTraceInThrowablesPhase,
     callsLoweringPhase,
     cleanupLoweringPhase,
     validateIrAfterLowering
@@ -661,6 +805,14 @@ val jsPhases = namedIrModulePhase(
     name = "IrModuleLowering",
     description = "IR module lowering",
     lower = loweringList.drop(1).fold(loweringList[0].modulePhase) { acc: CompilerPhase<JsIrBackendContext, IrModuleFragment, IrModuleFragment>, lowering ->
+        acc.then(lowering.modulePhase)
+    }
+)
+
+val jsEs6Phases = namedIrModulePhase(
+    name = "ES6IrModuleLowering",
+    description = "ES6 IR module lowering",
+    lower = es6LoweringList.drop(1).fold(es6LoweringList[0].modulePhase) { acc: CompilerPhase<JsIrBackendContext, IrModuleFragment, IrModuleFragment>, lowering ->
         acc.then(lowering.modulePhase)
     }
 )

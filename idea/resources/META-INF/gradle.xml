@@ -10,11 +10,15 @@
     <extensions defaultExtensionNs="org.jetbrains.kotlin">
         <buildSystemTypeDetector implementation="org.jetbrains.kotlin.idea.configuration.GradleDetector"/>
         <scriptDiagnosticFixProvider implementation="org.jetbrains.kotlin.idea.scripting.gradle.GradleScriptDiagnosticFixProvider"/>
+        <experimentalFeature implementation="org.jetbrains.kotlin.idea.scripting.gradle.GradleScriptConfigurationsImportingFeature"/>
     </extensions>
 
     <extensions defaultExtensionNs="org.jetbrains.kotlin.scripting.idea">
         <listener order="first" implementation="org.jetbrains.kotlin.idea.scripting.gradle.GradleScriptListener"/>
-        <loader order="first" implementation="org.jetbrains.kotlin.idea.scripting.gradle.GradleScriptConfigurationLoader"/>
+
+        <loader order="first" implementation="org.jetbrains.kotlin.idea.scripting.gradle.legacy.GradleLegacyScriptConfigurationLoader"/>
+
+        <scriptingSupport implementation="org.jetbrains.kotlin.idea.scripting.gradle.roots.GradleBuildRootsManager"/>
     </extensions>
 
     <extensions defaultExtensionNs="org.jetbrains.plugins.gradle">
@@ -27,14 +31,19 @@
         <projectTaskRunner implementation="org.jetbrains.kotlin.idea.gradle.execution.KotlinMPPGradleProjectTaskRunner" order="first, before gradle"/>
         <externalProjectDataService implementation="org.jetbrains.kotlin.idea.configuration.KotlinSourceSetDataService"/>
         <externalProjectDataService implementation="org.jetbrains.kotlin.idea.configuration.KotlinGradleProjectSettingsDataService"/>
-        <externalProjectDataService implementation="org.jetbrains.kotlin.idea.scripting.gradle.importing.KotlinDslScriptModelDataService"/>
+
         <registryKey key="kotlin.mpp.tests.force.gradle"
                      description="Run multi-platform tests with Gradle runner even if the platform runner is used by default.
                      This setting currently affects only HMPP projects. You may need to delete existing test configurations for the change to take place."
                      defaultValue="true"
                      restartRequired="false"/>
 
-        <projectService serviceImplementation="org.jetbrains.kotlin.idea.scripting.gradle.GradleScriptInputsWatcher"/>
+        <registryKey key="kotlin.gradle.scripts.scriptConfigurationsNeedToBeUpdatedBalloon"
+                     description="Show balloon when script configuration need to be updated along with project need to be imported balloon"
+                     defaultValue="false"
+                     restartRequired="false"/>
+
+        <projectService serviceImplementation="org.jetbrains.kotlin.idea.scripting.gradle.legacy.GradleStandaloneScriptActionsManager"/>
     </extensions>
 
     <actions>

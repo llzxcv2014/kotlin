@@ -21,22 +21,19 @@ import org.jetbrains.kotlin.idea.caches.project.isMPPModule
 import org.jetbrains.kotlin.idea.configuration.klib.KotlinNativeLibraryNameUtil.parseIDELibraryName
 import org.jetbrains.kotlin.idea.configuration.readGradleProperty
 import org.jetbrains.kotlin.idea.facet.KotlinFacet
-import org.jetbrains.kotlin.idea.framework.CommonLibraryKind
 import org.jetbrains.kotlin.idea.framework.detectLibraryKind
 import org.jetbrains.kotlin.idea.perf.PerformanceNativeProjectsTest.TestProject.*
 import org.jetbrains.kotlin.idea.perf.PerformanceNativeProjectsTest.TestTarget.*
 import org.jetbrains.kotlin.idea.perf.Stats.Companion.WARM_UP
-import org.jetbrains.kotlin.idea.perf.Stats.Companion.tcSuite
+import org.jetbrains.kotlin.idea.perf.util.TeamCity.suite
+import org.jetbrains.kotlin.idea.perf.util.logMessage
 import org.jetbrains.kotlin.idea.testFramework.ProjectOpenAction.GRADLE_PROJECT
-import org.jetbrains.kotlin.idea.testFramework.logMessage
 import org.jetbrains.kotlin.idea.testFramework.suggestOsNeutralFileName
 import org.jetbrains.kotlin.idea.util.projectStructure.allModules
 import org.jetbrains.kotlin.library.KOTLIN_STDLIB_NAME
 import org.jetbrains.kotlin.platform.konan.isNative
-import org.junit.Ignore
 import java.io.File
 
-@Ignore(value = "[VD] disabled temporary for further investigation: it fails on TC agents")
 class PerformanceNativeProjectsTest : AbstractPerformanceProjectsTest() {
 
     companion object {
@@ -158,7 +155,7 @@ class PerformanceNativeProjectsTest : AbstractPerformanceProjectsTest() {
         assertTrue("Target $testTarget is not allowed on your host OS", testTarget.enabled)
 
         val projectName = projectName(testTarget, testProject, enableCommonizer)
-        tcSuite(projectName) {
+        suite(projectName) {
             Stats(projectName).use { stats ->
                 myProject = perfOpenTemplateGradleProject(stats, testTarget, testProject, enableCommonizer)
 
@@ -259,9 +256,9 @@ class PerformanceNativeProjectsTest : AbstractPerformanceProjectsTest() {
                         buildString {
                             originalKtFileContents.forEachIndexed { index, line ->
                                 if (index == packageLineIndex) {
-                                    appendln(line.replace("perfTestPackage1", "perfTestPackage$n"))
+                                    appendLine(line.replace("perfTestPackage1", "perfTestPackage$n"))
                                 } else {
-                                    appendln(line)
+                                    appendLine(line)
                                 }
                             }
                         }
@@ -315,14 +312,7 @@ class PerformanceNativeProjectsTest : AbstractPerformanceProjectsTest() {
                     .asSequence()
                     .filterIsInstance<LibraryOrderEntry>()
                     .mapNotNull { it.library }
-                    .filter { library ->
-                        val libraryKind = detectLibraryKind(library.getFiles(OrderRootType.CLASSES))
-                        libraryKind == NativeLibraryKind
-                                // TODO: remove this check for CommonLibraryKind when detection of K/N KLIBs in
-                                //  org.jetbrains.kotlin.ide.konan.KotlinNativePluginUtilKt.isKonanLibraryRoot
-                                //  is correctly implemented
-                                || libraryKind == CommonLibraryKind
-                    }
+                    .filter { detectLibraryKind(it.getFiles(OrderRootType.CLASSES)) == NativeLibraryKind }
                     .mapNotNull inner@{ library ->
                         val libraryNameParts = parseIDELibraryName(library.name.orEmpty()) ?: return@inner null
                         val (_, pureLibraryName, platformPart) = libraryNameParts

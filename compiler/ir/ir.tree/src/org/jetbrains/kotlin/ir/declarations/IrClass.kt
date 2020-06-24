@@ -16,10 +16,8 @@
 
 package org.jetbrains.kotlin.ir.declarations
 
-import org.jetbrains.kotlin.descriptors.ClassDescriptor
-import org.jetbrains.kotlin.descriptors.ClassKind
-import org.jetbrains.kotlin.descriptors.Modality
-import org.jetbrains.kotlin.descriptors.Visibility
+import org.jetbrains.kotlin.descriptors.*
+import org.jetbrains.kotlin.ir.ObsoleteDescriptorBasedAPI
 import org.jetbrains.kotlin.ir.symbols.IrClassSymbol
 import org.jetbrains.kotlin.ir.types.IrType
 
@@ -27,6 +25,7 @@ interface IrClass :
     IrSymbolDeclaration<IrClassSymbol>, IrDeclarationWithName, IrDeclarationWithVisibility,
     IrDeclarationContainer, IrTypeParametersContainer, IrAttributeContainer {
 
+    @ObsoleteDescriptorBasedAPI
     override val descriptor: ClassDescriptor
 
     override var visibility: Visibility
@@ -40,6 +39,8 @@ interface IrClass :
     val isInline: Boolean
     val isExpect: Boolean
     val isFun: Boolean
+
+    val source: SourceElement
 
     var superTypes: List<IrType>
 

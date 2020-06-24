@@ -548,6 +548,7 @@ object Filtering : TemplateGroupBase() {
         specialFor(ArraysOfUnsigned) { inlineOnly() }
 
         doc { "Returns a ${f.mapResult} containing only ${f.element.pluralize()} matching the given [predicate]." }
+        sample("samples.collections.Collections.Filtering.filter")
         returns("List<T>")
         body {
             """
@@ -556,6 +557,7 @@ object Filtering : TemplateGroupBase() {
         }
 
         specialFor(Strings, CharSequences) {
+            sample("samples.text.Strings.filter")
             returns("SELF")
             doc { "Returns a ${f.collection} containing only those characters from the original ${f.collection} that match the given [predicate]." }
             body { """return filterTo(StringBuilder(), predicate)${toResult(f)}""" }
@@ -676,6 +678,7 @@ object Filtering : TemplateGroupBase() {
         specialFor(ArraysOfUnsigned) { inlineOnly() }
 
         doc { "Returns a list containing all elements not matching the given [predicate]." }
+        sample("samples.collections.Collections.Filtering.filter")
         returns("List<T>")
         body {
             """
@@ -684,6 +687,7 @@ object Filtering : TemplateGroupBase() {
         }
 
         specialFor(Strings, CharSequences) {
+            sample("samples.text.Strings.filterNot")
             returns("SELF")
             doc { "Returns a ${f.collection} containing only those characters from the original ${f.collection} that do not match the given [predicate]." }
             body { """return filterNotTo(StringBuilder(), predicate)${toResult(f)}""" }
@@ -730,6 +734,7 @@ object Filtering : TemplateGroupBase() {
         include(Iterables, Sequences, ArraysOfObjects)
     } builder {
         doc { "Returns a list containing all elements that are not `null`." }
+        sample("samples.collections.Collections.Filtering.filterNotNull")
         typeParam("T : Any")
         returns("List<T>")
         toNullableT = true

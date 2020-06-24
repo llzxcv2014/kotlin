@@ -13,6 +13,7 @@ import org.jetbrains.kotlin.fir.expressions.FirExpression
 import org.jetbrains.kotlin.fir.expressions.FirFunctionCall
 import org.jetbrains.kotlin.fir.expressions.impl.FirModifiableQualifiedAccess
 import org.jetbrains.kotlin.fir.references.FirNamedReference
+import org.jetbrains.kotlin.fir.references.FirReference
 import org.jetbrains.kotlin.fir.types.FirTypeProjection
 import org.jetbrains.kotlin.fir.types.FirTypeRef
 import org.jetbrains.kotlin.fir.visitors.*
@@ -26,7 +27,6 @@ open class FirFunctionCallImpl @FirImplementationDetail constructor(
     override val source: FirSourceElement?,
     override var typeRef: FirTypeRef,
     override val annotations: MutableList<FirAnnotationCall>,
-    override var safe: Boolean,
     override val typeArguments: MutableList<FirTypeProjection>,
     override var explicitReceiver: FirExpression?,
     override var dispatchReceiver: FirExpression,
@@ -51,7 +51,7 @@ open class FirFunctionCallImpl @FirImplementationDetail constructor(
 
     override fun <D> transformChildren(transformer: FirTransformer<D>, data: D): FirFunctionCallImpl {
         typeRef = typeRef.transformSingle(transformer, data)
-        annotations.transformInplace(transformer, data)
+        transformAnnotations(transformer, data)
         transformTypeArguments(transformer, data)
         explicitReceiver = explicitReceiver?.transformSingle(transformer, data)
         if (dispatchReceiver !== explicitReceiver) {
@@ -62,6 +62,11 @@ open class FirFunctionCallImpl @FirImplementationDetail constructor(
         }
         argumentList = argumentList.transformSingle(transformer, data)
         transformCalleeReference(transformer, data)
+        return this
+    }
+
+    override fun <D> transformAnnotations(transformer: FirTransformer<D>, data: D): FirFunctionCallImpl {
+        annotations.transformInplace(transformer, data)
         return this
     }
 
@@ -101,5 +106,14 @@ open class FirFunctionCallImpl @FirImplementationDetail constructor(
 
     override fun replaceArgumentList(newArgumentList: FirArgumentList) {
         argumentList = newArgumentList
+    }
+
+    override fun replaceCalleeReference(newCalleeReference: FirNamedReference) {
+        calleeReference = newCalleeReference
+    }
+
+    override fun replaceCalleeReference(newCalleeReference: FirReference) {
+        require(newCalleeReference is FirNamedReference)
+        replaceCalleeReference(newCalleeReference)
     }
 }

@@ -20,9 +20,7 @@ import com.intellij.refactoring.rename.UnresolvableCollisionUsageInfo
 import com.intellij.refactoring.util.CommonRefactoringUtil
 import com.intellij.refactoring.util.MoveRenameUsageInfo
 import com.intellij.refactoring.util.RefactoringUIUtil
-import com.intellij.refactoring.util.TextOccurrencesUtil
 import com.intellij.usageView.UsageInfo
-import com.intellij.util.containers.HashSet
 import com.intellij.util.containers.MultiMap
 import org.jetbrains.kotlin.asJava.elements.KtLightMethod
 import org.jetbrains.kotlin.asJava.namedUnwrappedElement
@@ -61,10 +59,12 @@ import org.jetbrains.kotlin.psi.typeRefHelpers.setReceiverTypeReference
 import org.jetbrains.kotlin.renderer.DescriptorRenderer
 import org.jetbrains.kotlin.resolve.BindingContext
 import org.jetbrains.kotlin.resolve.DescriptorToSourceUtils
+import org.jetbrains.kotlin.resolve.DescriptorUtils
 import org.jetbrains.kotlin.resolve.calls.callUtil.getResolvedCall
 import org.jetbrains.kotlin.resolve.calls.tasks.ExplicitReceiverKind
 import org.jetbrains.kotlin.resolve.descriptorUtil.classId
 import org.jetbrains.kotlin.resolve.lazy.BodyResolveMode
+import org.jetbrains.kotlin.resolve.scopes.receivers.ExtensionReceiver
 import org.jetbrains.kotlin.resolve.scopes.receivers.ImplicitReceiver
 import org.jetbrains.kotlin.resolve.source.getPsi
 import org.jetbrains.kotlin.util.OperatorNameConventions
@@ -94,9 +94,11 @@ class KotlinChangeSignatureUsageProcessor : ChangeSignatureUsageProcessor {
     private var initializedOriginalDescriptor: Boolean = false
 
     override fun findUsages(info: ChangeInfo): Array<UsageInfo> {
+        if (!canHandle(info)) return UsageInfo.EMPTY_ARRAY
+
         initializedOriginalDescriptor = false
 
-        val result = HashSet<UsageInfo>()
+        val result = hashSetOf<UsageInfo>()
 
         result.add(OriginalJavaMethodDescriptorWrapper(info.method))
 
@@ -113,6 +115,11 @@ class KotlinChangeSignatureUsageProcessor : ChangeSignatureUsageProcessor {
 
         return result.toTypedArray()
     }
+
+    private fun canHandle(changeInfo: ChangeInfo) =
+        changeInfo is KotlinChangeInfo
+                || changeInfo is KotlinChangeInfoWrapper
+                || changeInfo is JavaChangeInfo
 
     private fun findAllMethodUsages(changeInfo: KotlinChangeInfo, result: MutableSet<UsageInfo>) {
         loop@ for (functionUsageInfo in changeInfo.getAffectedCallables()) {
@@ -155,7 +162,7 @@ class KotlinChangeSignatureUsageProcessor : ChangeSignatureUsageProcessor {
         val body = element.getDeclarationBody() ?: return
         val callerDescriptor = element.resolveToDescriptorIfAny() ?: return
         val context = body.analyze()
-        val newParameterNames = changeInfo.getNonReceiverParameters().mapTo(HashSet<String>()) { it.name }
+        val newParameterNames = changeInfo.getNonReceiverParameters().mapTo(hashSetOf()) { it.name }
         body.accept(
             object : KtTreeVisitorVoid() {
                 override fun visitSimpleNameExpression(expression: KtSimpleNameExpression) {
@@ -262,7 +269,7 @@ class KotlinChangeSignatureUsageProcessor : ChangeSignatureUsageProcessor {
         val oldName = changeInfo.oldName
 
         if (oldName != null) {
-            TextOccurrencesUtil.findNonCodeUsages(functionPsi, oldName, true, true, changeInfo.newName, result)
+            BunchedDeprecation.findNonCodeUsages(functionPsi, oldName, true, true, changeInfo.newName, result)
         }
 
         val oldParameters = (functionPsi as KtNamedDeclaration).getValueParameters()
@@ -360,9 +367,11 @@ class KotlinChangeSignatureUsageProcessor : ChangeSignatureUsageProcessor {
                         assert(originalReceiverInfo != null) { "No original receiver info provided: " + functionUsageInfo.declaration.text }
                         result.add(KotlinParameterUsage(expression, originalReceiverInfo!!, functionUsageInfo))
                     } else {
+                        if (receiverDescriptor.value is ExtensionReceiver) return
                         val targetDescriptor = receiverDescriptor.type.constructor.declarationDescriptor
                         assert(targetDescriptor != null) { "Receiver type has no descriptor: " + functionUsageInfo.declaration.text }
-                        result.add(KotlinNonQualifiedOuterThisUsage(expression.parent as KtThisExpression, targetDescriptor!!))
+                        if (DescriptorUtils.isAnonymousObject(targetDescriptor!!)) return
+                        result.add(KotlinNonQualifiedOuterThisUsage(expression.parent as KtThisExpression, targetDescriptor))
                     }
                 }
 
@@ -525,7 +534,7 @@ class KotlinChangeSignatureUsageProcessor : ChangeSignatureUsageProcessor {
 
         val ktChangeInfo = info.delegate!!
 
-        val parameterNames = HashSet<String>()
+        val parameterNames = hashSetOf<String>()
         val function = info.method
         val bindingContext = (function as KtElement).analyze(BodyResolveMode.FULL)
         val oldDescriptor = ktChangeInfo.originalBaseFunctionDescriptor
@@ -986,8 +995,12 @@ class KotlinChangeSignatureUsageProcessor : ChangeSignatureUsageProcessor {
                     baseFunction = baseFunction.createPrimaryConstructorIfAbsent()
                 }
                 val resolutionFacade = baseFunction.getResolutionFacade()
-                val baseFunctionDescriptor = baseFunction.unsafeResolveToDescriptor() as FunctionDescriptor
-                val methodDescriptor = KotlinChangeSignatureData(baseFunctionDescriptor, baseFunction, listOf(baseFunctionDescriptor))
+                val baseCallableDescriptor = baseFunction.unsafeResolveToDescriptor() as CallableDescriptor
+                if (baseCallableDescriptor !is FunctionDescriptor) {
+                    return false
+                }
+
+                val methodDescriptor = KotlinChangeSignatureData(baseCallableDescriptor, baseFunction, listOf(baseCallableDescriptor))
 
                 val dummyClass = JavaPsiFacade.getElementFactory(method.project).createClass("Dummy")
                 val dummyMethod = createJavaMethod(method, dummyClass)

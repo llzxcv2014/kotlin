@@ -79,21 +79,20 @@ fun Project.projectTest(
         }
     }
 
-    doFirst {
-        val agent = tasks.findByPath(":test-instrumenter:jar")!!.outputs.files.singleFile
-
-        val args = project.findProperty("kotlin.test.instrumentation.args")?.let { "=$it" }.orEmpty()
-
-        jvmArgs("-javaagent:$agent$args")
+    if (project.findProperty("kotlin.test.instrumentation.disable")?.toString()?.toBoolean() != true) {
+        doFirst {
+            val agent = tasks.findByPath(":test-instrumenter:jar")!!.outputs.files.singleFile
+            val args = project.findProperty("kotlin.test.instrumentation.args")?.let { "=$it" }.orEmpty()
+            jvmArgs("-javaagent:$agent$args")
+        }
+        dependsOn(":test-instrumenter:jar")
     }
-
-    dependsOn(":test-instrumenter:jar")
 
     jvmArgs(
         "-ea",
         "-XX:+HeapDumpOnOutOfMemoryError",
         "-XX:+UseCodeCacheFlushing",
-        "-XX:ReservedCodeCacheSize=128m",
+        "-XX:ReservedCodeCacheSize=256m",
         "-Djna.nosys=true"
     )
 
@@ -106,6 +105,11 @@ fun Project.projectTest(
     environment("PROJECT_BUILD_DIR", buildDir)
     systemProperty("jps.kotlin.home", rootProject.extra["distKotlinHomeDir"]!!)
     systemProperty("kotlin.ni", if (rootProject.hasProperty("newInferenceTests")) "true" else "false")
+    systemProperty("org.jetbrains.kotlin.skip.muted.tests", if (rootProject.hasProperty("skipMutedTests")) "true" else "false")
+
+    if (Platform[202].orHigher()) {
+        systemProperty("idea.ignore.disabled.plugins", "true")
+    }
 
     var subProjectTempRoot: Path? = null
     doFirst {
@@ -153,6 +157,10 @@ object TaskUtils {
 
     fun useAndroidJar(task: Task) {
         task.useAndroidConfiguration(systemPropertyName = "android.jar", configName = "androidJar")
+    }
+
+    fun useAndroidEmulator(task: Task) {
+        task.useAndroidConfiguration(systemPropertyName = "android.sdk", configName = "androidEmulator")
     }
 }
 

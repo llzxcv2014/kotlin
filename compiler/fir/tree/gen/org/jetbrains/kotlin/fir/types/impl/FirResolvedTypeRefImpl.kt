@@ -22,6 +22,7 @@ internal class FirResolvedTypeRefImpl(
     override val annotations: MutableList<FirAnnotationCall>,
     override val type: ConeKotlinType,
     override var delegatedTypeRef: FirTypeRef?,
+    override val isSuspend: Boolean,
 ) : FirResolvedTypeRef() {
     override fun <R, D> acceptChildren(visitor: FirVisitor<R, D>, data: D) {
         annotations.forEach { it.accept(visitor, data) }
@@ -29,8 +30,13 @@ internal class FirResolvedTypeRefImpl(
     }
 
     override fun <D> transformChildren(transformer: FirTransformer<D>, data: D): FirResolvedTypeRefImpl {
-        annotations.transformInplace(transformer, data)
+        transformAnnotations(transformer, data)
         delegatedTypeRef = delegatedTypeRef?.transformSingle(transformer, data)
+        return this
+    }
+
+    override fun <D> transformAnnotations(transformer: FirTransformer<D>, data: D): FirResolvedTypeRefImpl {
+        annotations.transformInplace(transformer, data)
         return this
     }
 }

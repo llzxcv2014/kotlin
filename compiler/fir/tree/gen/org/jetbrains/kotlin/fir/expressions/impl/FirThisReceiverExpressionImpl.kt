@@ -11,6 +11,7 @@ import org.jetbrains.kotlin.fir.expressions.FirExpression
 import org.jetbrains.kotlin.fir.expressions.FirThisReceiverExpression
 import org.jetbrains.kotlin.fir.expressions.impl.FirModifiableQualifiedAccess
 import org.jetbrains.kotlin.fir.expressions.impl.FirNoReceiverExpression
+import org.jetbrains.kotlin.fir.references.FirReference
 import org.jetbrains.kotlin.fir.references.FirThisReference
 import org.jetbrains.kotlin.fir.types.FirTypeProjection
 import org.jetbrains.kotlin.fir.types.FirTypeRef
@@ -28,7 +29,6 @@ internal class FirThisReceiverExpressionImpl(
     override val typeArguments: MutableList<FirTypeProjection>,
     override var calleeReference: FirThisReference,
 ) : FirThisReceiverExpression(), FirModifiableQualifiedAccess {
-    override var safe: Boolean = false
     override var explicitReceiver: FirExpression? = null
     override var dispatchReceiver: FirExpression = FirNoReceiverExpression
     override var extensionReceiver: FirExpression = FirNoReceiverExpression
@@ -49,7 +49,7 @@ internal class FirThisReceiverExpressionImpl(
 
     override fun <D> transformChildren(transformer: FirTransformer<D>, data: D): FirThisReceiverExpressionImpl {
         typeRef = typeRef.transformSingle(transformer, data)
-        annotations.transformInplace(transformer, data)
+        transformAnnotations(transformer, data)
         transformTypeArguments(transformer, data)
         explicitReceiver = explicitReceiver?.transformSingle(transformer, data)
         if (dispatchReceiver !== explicitReceiver) {
@@ -59,6 +59,11 @@ internal class FirThisReceiverExpressionImpl(
             extensionReceiver = extensionReceiver.transformSingle(transformer, data)
         }
         transformCalleeReference(transformer, data)
+        return this
+    }
+
+    override fun <D> transformAnnotations(transformer: FirTransformer<D>, data: D): FirThisReceiverExpressionImpl {
+        annotations.transformInplace(transformer, data)
         return this
     }
 
@@ -94,5 +99,14 @@ internal class FirThisReceiverExpressionImpl(
     override fun replaceTypeArguments(newTypeArguments: List<FirTypeProjection>) {
         typeArguments.clear()
         typeArguments.addAll(newTypeArguments)
+    }
+
+    override fun replaceCalleeReference(newCalleeReference: FirThisReference) {
+        calleeReference = newCalleeReference
+    }
+
+    override fun replaceCalleeReference(newCalleeReference: FirReference) {
+        require(newCalleeReference is FirThisReference)
+        replaceCalleeReference(newCalleeReference)
     }
 }

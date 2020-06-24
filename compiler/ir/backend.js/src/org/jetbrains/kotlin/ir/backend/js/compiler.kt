@@ -10,6 +10,7 @@ import org.jetbrains.kotlin.analyzer.AbstractAnalyzerWithCompilerReport
 import org.jetbrains.kotlin.backend.common.phaser.PhaseConfig
 import org.jetbrains.kotlin.backend.common.phaser.invokeToplevel
 import org.jetbrains.kotlin.config.CompilerConfiguration
+import org.jetbrains.kotlin.config.languageVersionSettings
 import org.jetbrains.kotlin.ir.backend.js.lower.generateTests
 import org.jetbrains.kotlin.ir.backend.js.lower.moveBodilessDeclarationsToSeparatePlace
 import org.jetbrains.kotlin.ir.backend.js.transformers.irToJs.IrModuleToJsTransformer
@@ -18,9 +19,9 @@ import org.jetbrains.kotlin.ir.backend.js.utils.NameTables
 import org.jetbrains.kotlin.ir.declarations.IrModuleFragment
 import org.jetbrains.kotlin.ir.declarations.StageController
 import org.jetbrains.kotlin.ir.declarations.stageController
+import org.jetbrains.kotlin.ir.util.DeclarationStubGenerator
 import org.jetbrains.kotlin.ir.util.ExternalDependenciesGenerator
-import org.jetbrains.kotlin.ir.util.generateTypicalIrProviderList
-import org.jetbrains.kotlin.ir.util.patchDeclarationParents
+import org.jetbrains.kotlin.ir.util.noUnboundLeft
 import org.jetbrains.kotlin.library.KotlinLibrary
 import org.jetbrains.kotlin.library.resolver.KotlinLibraryResolveResult
 import org.jetbrains.kotlin.name.FqName
@@ -43,7 +44,8 @@ fun compile(
     exportedDeclarations: Set<FqName> = emptySet(),
     generateFullJs: Boolean = true,
     generateDceJs: Boolean = false,
-    dceDriven: Boolean = false
+    dceDriven: Boolean = false,
+    es6mode: Boolean = false
 ): CompilerResult {
     stageController = object : StageController {}
 
@@ -54,13 +56,11 @@ fun compile(
 
     val mainFunction = JsMainFunctionDetector.getMainFunctionOrNull(moduleFragment)
 
-    val context = JsIrBackendContext(moduleDescriptor, irBuiltIns, symbolTable, moduleFragment, exportedDeclarations, configuration)
+    val context = JsIrBackendContext(moduleDescriptor, irBuiltIns, symbolTable, moduleFragment, exportedDeclarations, configuration, es6mode = es6mode)
 
     // Load declarations referenced during `context` initialization
-    dependencyModules.forEach {
-        val irProviders = generateTypicalIrProviderList(it.descriptor, irBuiltIns, symbolTable, deserializer)
-        ExternalDependenciesGenerator(symbolTable, irProviders).generateUnboundSymbolsAsDependencies()
-    }
+    val irProviders = listOf(deserializer)
+    ExternalDependenciesGenerator(symbolTable, irProviders, configuration.languageVersionSettings).generateUnboundSymbolsAsDependencies()
 
     val allModules = when (mainModule) {
         is MainModule.SourceFiles -> dependencyModules + listOf(moduleFragment)
@@ -69,15 +69,11 @@ fun compile(
 
     val irFiles = allModules.flatMap { it.files }
 
+    deserializer.postProcess()
+    symbolTable.noUnboundLeft("Unbound symbols at the end of linker")
+
     moduleFragment.files.clear()
     moduleFragment.files += irFiles
-
-    val irProvidersWithoutDeserializer = generateTypicalIrProviderList(moduleDescriptor, irBuiltIns, symbolTable)
-    // Create stubs
-    ExternalDependenciesGenerator(symbolTable, irProvidersWithoutDeserializer).generateUnboundSymbolsAsDependencies()
-    moduleFragment.patchDeclarationParents()
-
-    deserializer.finalizeExpectActualLinker()
 
     moveBodilessDeclarationsToSeparatePlace(context, moduleFragment)
 
@@ -102,7 +98,8 @@ fun compile(
         val transformer = IrModuleToJsTransformer(context, mainFunction, mainArguments)
         return transformer.generateModule(moduleFragment, fullJs = true, dceJs = false)
     } else {
-        jsPhases.invokeToplevel(phaseConfig, context, moduleFragment)
+        val phases = if (es6mode) jsEs6Phases else jsPhases
+        phases.invokeToplevel(phaseConfig, context, moduleFragment)
         val transformer = IrModuleToJsTransformer(context, mainFunction, mainArguments)
         return transformer.generateModule(moduleFragment, generateFullJs, generateDceJs)
     }

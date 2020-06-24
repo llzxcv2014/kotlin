@@ -7,11 +7,12 @@ package org.jetbrains.kotlin.descriptors.commonizer.builder
 
 import org.jetbrains.kotlin.builtins.KotlinBuiltIns
 import org.jetbrains.kotlin.descriptors.*
-import org.jetbrains.kotlin.descriptors.commonizer.StatsCollector
+import org.jetbrains.kotlin.descriptors.commonizer.Parameters
 import org.jetbrains.kotlin.descriptors.commonizer.Target
-import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.ir.CirRootNode
-import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.ir.dimension
-import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.ir.indexOfCommon
+import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.CirNode.Companion.dimension
+import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.CirNode.Companion.indexOfCommon
+import org.jetbrains.kotlin.descriptors.commonizer.mergedtree.CirRootNode
+import org.jetbrains.kotlin.descriptors.commonizer.stats.StatsCollector
 import org.jetbrains.kotlin.descriptors.commonizer.utils.CommonizedGroup
 import org.jetbrains.kotlin.descriptors.commonizer.utils.CommonizedGroupMap
 import org.jetbrains.kotlin.descriptors.commonizer.utils.createKotlinNativeForwardDeclarationsModule
@@ -25,7 +26,7 @@ import org.jetbrains.kotlin.storage.StorageManager
 /**
  * Temporary caches for constructed descriptors.
  */
-class DeclarationsBuilderCache(dimension: Int) {
+class DeclarationsBuilderCache(private val dimension: Int) {
     init {
         check(dimension > 0)
     }
@@ -43,8 +44,26 @@ class DeclarationsBuilderCache(dimension: Int) {
 
     fun getCachedClasses(fqName: FqName): List<CommonizedClassDescriptor?> = classes.getOrFail(fqName)
 
-    fun getCachedClassifier(fqName: FqName, index: Int): ClassifierDescriptorWithTypeParameters? =
-        classes.getOrNull(fqName)?.get(index) ?: typeAliases.getOrNull(fqName)?.get(index)
+    fun getCachedClassifier(fqName: FqName, index: Int): ClassifierDescriptorWithTypeParameters? {
+        // first, look up for class
+        val classes: CommonizedGroup<CommonizedClassDescriptor>? = classes.getOrNull(fqName)
+        classes?.get(index)?.let { return it }
+
+        // then, for type alias
+        val typeAliases: CommonizedGroup<CommonizedTypeAliasDescriptor>? = typeAliases.getOrNull(fqName)
+        typeAliases?.get(index)?.let { return it }
+
+        val indexOfCommon = dimension - 1
+        if (indexOfCommon != index) {
+            // then, for class from the common fragment
+            classes?.get(indexOfCommon)?.let { return it }
+
+            // then, for type alias from the common fragment
+            typeAliases?.get(indexOfCommon)?.let { return it }
+        }
+
+        return null
+    }
 
     fun cache(index: Int, modules: List<ModuleDescriptorImpl>) {
         this.modules[index] = modules
@@ -62,7 +81,7 @@ class DeclarationsBuilderCache(dimension: Int) {
         typeAliases[fqName][index] = descriptor
     }
 
-    fun computeIfAbsentForwardDeclarationsModule(index: Int, computable: () -> ModuleDescriptorImpl): ModuleDescriptorImpl {
+    fun getOrPutForwardDeclarationsModule(index: Int, computable: () -> ModuleDescriptorImpl): ModuleDescriptorImpl {
         forwardDeclarationsModules[index]?.let { return it }
 
         val module = computable()
@@ -92,7 +111,7 @@ class DeclarationsBuilderCache(dimension: Int) {
 
     companion object {
         private inline fun <reified K, reified V : DeclarationDescriptor> CommonizedGroupMap<K, V>.getOrFail(key: K): List<V?> =
-            getOrNull(key)?.toList() ?: error("No cached ${V::class.java} with key $key found")
+            getOrNull(key) ?: error("No cached ${V::class.java} with key $key found")
     }
 }
 
@@ -122,7 +141,7 @@ class TargetDeclarationsBuilderComponents(
         return if (fqName.isUnderKotlinNativeSyntheticPackages) {
             // that's a synthetic Kotlin/Native classifier that was exported as forward declaration in one or more modules,
             // but did not match any existing class or typealias
-            val module = cache.computeIfAbsentForwardDeclarationsModule(index) {
+            val module = cache.getOrPutForwardDeclarationsModule(index) {
                 // N.B. forward declarations module is created only on demand
                 createKotlinNativeForwardDeclarationsModule(
                     storageManager = storageManager,
@@ -148,13 +167,13 @@ class TargetDeclarationsBuilderComponents(
 
 fun CirRootNode.createGlobalBuilderComponents(
     storageManager: StorageManager,
-    statsCollector: StatsCollector?
+    parameters: Parameters
 ): GlobalDeclarationsBuilderComponents {
     val cache = DeclarationsBuilderCache(dimension)
 
     val targetContexts = (0 until dimension).map { index ->
         val isCommon = index == indexOfCommon
-        val root = if (isCommon) common()!! else target[index]!!
+        val root = if (isCommon) commonDeclaration()!! else targetDeclarations[index]!!
 
         val builtIns = root.builtInsProvider.loadBuiltIns()
         check(builtIns::class.java.name == root.builtInsClass) {
@@ -171,7 +190,7 @@ fun CirRootNode.createGlobalBuilderComponents(
         )
     }
 
-    return GlobalDeclarationsBuilderComponents(storageManager, targetContexts, cache, statsCollector)
+    return GlobalDeclarationsBuilderComponents(storageManager, targetContexts, cache, parameters.statsCollector)
 }
 
 interface TypeParameterResolver {
